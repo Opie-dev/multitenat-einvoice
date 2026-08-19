@@ -1,0 +1,607 @@
+{
+    "_D": "urn:oasis:names:specification:ubl:schema:xsd:Invoice-2",
+    "_A": "urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2",
+    "_B": "urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2",
+    "Invoice": [
+        {
+            "ID": [
+                {
+                    "_": "INV-0002"
+                }
+            ],
+            "IssueDate": [
+                {
+                    "_": "2026-08-20"
+                }
+            ],
+            "IssueTime": [
+                {
+                    "_": "03:04:05Z"
+                }
+            ],
+            "InvoiceTypeCode": [
+                {
+                    "_": "02",
+                    "listVersionID": "1.1"
+                }
+            ],
+            "DocumentCurrencyCode": [
+                {
+                    "_": "MYR"
+                }
+            ],
+            "TaxCurrencyCode": [
+                {
+                    "_": "MYR"
+                }
+            ],
+            "BillingReference": [
+                {
+                    "InvoiceDocumentReference": [
+                        {
+                            "ID": [
+                                {
+                                    "_": "INV-0001"
+                                }
+                            ],
+                            "UUID": [
+                                {
+                                    "_": "UUID-ORIG"
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ],
+            "AccountingSupplierParty": [
+                {
+                    "Party": [
+                        {
+                            "IndustryClassificationCode": [
+                                {
+                                    "_": "47911",
+                                    "name": "Retail sale via internet"
+                                }
+                            ],
+                            "PartyIdentification": [
+                                {
+                                    "ID": [
+                                        {
+                                            "_": "C12345678901",
+                                            "schemeID": "TIN"
+                                        }
+                                    ]
+                                },
+                                {
+                                    "ID": [
+                                        {
+                                            "_": "202001012345",
+                                            "schemeID": "BRN"
+                                        }
+                                    ]
+                                },
+                                {
+                                    "ID": [
+                                        {
+                                            "_": "W10-1808-32000001",
+                                            "schemeID": "SST"
+                                        }
+                                    ]
+                                }
+                            ],
+                            "PostalAddress": [
+                                {
+                                    "CityName": [
+                                        {
+                                            "_": "Kuala Lumpur"
+                                        }
+                                    ],
+                                    "PostalZone": [
+                                        {
+                                            "_": "50000"
+                                        }
+                                    ],
+                                    "CountrySubentityCode": [
+                                        {
+                                            "_": "14"
+                                        }
+                                    ],
+                                    "AddressLine": [
+                                        {
+                                            "Line": [
+                                                {
+                                                    "_": "1 Jalan Test"
+                                                }
+                                            ]
+                                        }
+                                    ],
+                                    "Country": [
+                                        {
+                                            "IdentificationCode": [
+                                                {
+                                                    "_": "MYS",
+                                                    "listID": "ISO3166-1",
+                                                    "listAgencyID": "6"
+                                                }
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ],
+                            "PartyLegalEntity": [
+                                {
+                                    "RegistrationName": [
+                                        {
+                                            "_": "Vendor One Sdn Bhd"
+                                        }
+                                    ]
+                                }
+                            ],
+                            "Contact": [
+                                {
+                                    "Telephone": [
+                                        {
+                                            "_": "+60123456789"
+                                        }
+                                    ],
+                                    "ElectronicMail": [
+                                        {
+                                            "_": "vendor@example.com"
+                                        }
+                                    ]
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ],
+            "AccountingCustomerParty": [
+                {
+                    "Party": [
+                        {
+                            "PartyIdentification": [
+                                {
+                                    "ID": [
+                                        {
+                                            "_": "EI00000000010",
+                                            "schemeID": "TIN"
+                                        }
+                                    ]
+                                },
+                                {
+                                    "ID": [
+                                        {
+                                            "_": "NA",
+                                            "schemeID": "BRN"
+                                        }
+                                    ]
+                                }
+                            ],
+                            "PostalAddress": [
+                                {
+                                    "CityName": [
+                                        {
+                                            "_": "NA"
+                                        }
+                                    ],
+                                    "PostalZone": [
+                                        {
+                                            "_": "NA"
+                                        }
+                                    ],
+                                    "CountrySubentityCode": [
+                                        {
+                                            "_": "17"
+                                        }
+                                    ],
+                                    "AddressLine": [
+                                        {
+                                            "Line": [
+                                                {
+                                                    "_": "NA"
+                                                }
+                                            ]
+                                        }
+                                    ],
+                                    "Country": [
+                                        {
+                                            "IdentificationCode": [
+                                                {
+                                                    "_": "MYS",
+                                                    "listID": "ISO3166-1",
+                                                    "listAgencyID": "6"
+                                                }
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ],
+                            "PartyLegalEntity": [
+                                {
+                                    "RegistrationName": [
+                                        {
+                                            "_": "General Public"
+                                        }
+                                    ]
+                                }
+                            ],
+                            "Contact": [
+                                {
+                                    "Telephone": [
+                                        {
+                                            "_": "NA"
+                                        }
+                                    ]
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ],
+            "InvoiceLine": [
+                {
+                    "ID": [
+                        {
+                            "_": "1"
+                        }
+                    ],
+                    "InvoicedQuantity": [
+                        {
+                            "_": 2.0,
+                            "unitCode": "C62"
+                        }
+                    ],
+                    "LineExtensionAmount": [
+                        {
+                            "_": 21.0,
+                            "currencyID": "MYR"
+                        }
+                    ],
+                    "TaxTotal": [
+                        {
+                            "TaxAmount": [
+                                {
+                                    "_": 1.26,
+                                    "currencyID": "MYR"
+                                }
+                            ],
+                            "TaxSubtotal": [
+                                {
+                                    "TaxableAmount": [
+                                        {
+                                            "_": 21.0,
+                                            "currencyID": "MYR"
+                                        }
+                                    ],
+                                    "TaxAmount": [
+                                        {
+                                            "_": 1.26,
+                                            "currencyID": "MYR"
+                                        }
+                                    ],
+                                    "TaxCategory": [
+                                        {
+                                            "ID": [
+                                                {
+                                                    "_": "02"
+                                                }
+                                            ],
+                                            "Percent": [
+                                                {
+                                                    "_": 6.0
+                                                }
+                                            ],
+                                            "TaxScheme": [
+                                                {
+                                                    "ID": [
+                                                        {
+                                                            "_": "OTH",
+                                                            "schemeID": "UN/ECE 5153",
+                                                            "schemeAgencyID": "6"
+                                                        }
+                                                    ]
+                                                }
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        }
+                    ],
+                    "Item": [
+                        {
+                            "CommodityClassification": [
+                                {
+                                    "ItemClassificationCode": [
+                                        {
+                                            "_": "022",
+                                            "listID": "CLASS"
+                                        }
+                                    ]
+                                }
+                            ],
+                            "Description": [
+                                {
+                                    "_": "Widget"
+                                }
+                            ]
+                        }
+                    ],
+                    "Price": [
+                        {
+                            "PriceAmount": [
+                                {
+                                    "_": 10.5,
+                                    "currencyID": "MYR"
+                                }
+                            ]
+                        }
+                    ],
+                    "ItemPriceExtension": [
+                        {
+                            "Amount": [
+                                {
+                                    "_": 21.0,
+                                    "currencyID": "MYR"
+                                }
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "ID": [
+                        {
+                            "_": "2"
+                        }
+                    ],
+                    "InvoicedQuantity": [
+                        {
+                            "_": 1.0,
+                            "unitCode": "C62"
+                        }
+                    ],
+                    "LineExtensionAmount": [
+                        {
+                            "_": 4.0,
+                            "currencyID": "MYR"
+                        }
+                    ],
+                    "AllowanceCharge": [
+                        {
+                            "ChargeIndicator": [
+                                {
+                                    "_": false
+                                }
+                            ],
+                            "AllowanceChargeReason": [
+                                {
+                                    "_": "Discount"
+                                }
+                            ],
+                            "Amount": [
+                                {
+                                    "_": 1.0,
+                                    "currencyID": "MYR"
+                                }
+                            ]
+                        }
+                    ],
+                    "TaxTotal": [
+                        {
+                            "TaxAmount": [
+                                {
+                                    "_": 0.0,
+                                    "currencyID": "MYR"
+                                }
+                            ],
+                            "TaxSubtotal": [
+                                {
+                                    "TaxableAmount": [
+                                        {
+                                            "_": 4.0,
+                                            "currencyID": "MYR"
+                                        }
+                                    ],
+                                    "TaxAmount": [
+                                        {
+                                            "_": 0.0,
+                                            "currencyID": "MYR"
+                                        }
+                                    ],
+                                    "TaxCategory": [
+                                        {
+                                            "ID": [
+                                                {
+                                                    "_": "E"
+                                                }
+                                            ],
+                                            "TaxExemptionReason": [
+                                                {
+                                                    "_": "Exempt goods"
+                                                }
+                                            ],
+                                            "TaxScheme": [
+                                                {
+                                                    "ID": [
+                                                        {
+                                                            "_": "OTH",
+                                                            "schemeID": "UN/ECE 5153",
+                                                            "schemeAgencyID": "6"
+                                                        }
+                                                    ]
+                                                }
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        }
+                    ],
+                    "Item": [
+                        {
+                            "CommodityClassification": [
+                                {
+                                    "ItemClassificationCode": [
+                                        {
+                                            "_": "022",
+                                            "listID": "CLASS"
+                                        }
+                                    ]
+                                }
+                            ],
+                            "Description": [
+                                {
+                                    "_": "Exempt thing"
+                                }
+                            ]
+                        }
+                    ],
+                    "Price": [
+                        {
+                            "PriceAmount": [
+                                {
+                                    "_": 5.0,
+                                    "currencyID": "MYR"
+                                }
+                            ]
+                        }
+                    ],
+                    "ItemPriceExtension": [
+                        {
+                            "Amount": [
+                                {
+                                    "_": 5.0,
+                                    "currencyID": "MYR"
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ],
+            "TaxTotal": [
+                {
+                    "TaxAmount": [
+                        {
+                            "_": 1.26,
+                            "currencyID": "MYR"
+                        }
+                    ],
+                    "TaxSubtotal": [
+                        {
+                            "TaxableAmount": [
+                                {
+                                    "_": 21.0,
+                                    "currencyID": "MYR"
+                                }
+                            ],
+                            "TaxAmount": [
+                                {
+                                    "_": 1.26,
+                                    "currencyID": "MYR"
+                                }
+                            ],
+                            "TaxCategory": [
+                                {
+                                    "ID": [
+                                        {
+                                            "_": "02"
+                                        }
+                                    ],
+                                    "Percent": [
+                                        {
+                                            "_": 6.0
+                                        }
+                                    ],
+                                    "TaxScheme": [
+                                        {
+                                            "ID": [
+                                                {
+                                                    "_": "OTH",
+                                                    "schemeID": "UN/ECE 5153",
+                                                    "schemeAgencyID": "6"
+                                                }
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "TaxableAmount": [
+                                {
+                                    "_": 4.0,
+                                    "currencyID": "MYR"
+                                }
+                            ],
+                            "TaxAmount": [
+                                {
+                                    "_": 0.0,
+                                    "currencyID": "MYR"
+                                }
+                            ],
+                            "TaxCategory": [
+                                {
+                                    "ID": [
+                                        {
+                                            "_": "E"
+                                        }
+                                    ],
+                                    "TaxExemptionReason": [
+                                        {
+                                            "_": "Exempt goods"
+                                        }
+                                    ],
+                                    "TaxScheme": [
+                                        {
+                                            "ID": [
+                                                {
+                                                    "_": "OTH",
+                                                    "schemeID": "UN/ECE 5153",
+                                                    "schemeAgencyID": "6"
+                                                }
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ],
+            "LegalMonetaryTotal": [
+                {
+                    "LineExtensionAmount": [
+                        {
+                            "_": 25.0,
+                            "currencyID": "MYR"
+                        }
+                    ],
+                    "TaxExclusiveAmount": [
+                        {
+                            "_": 25.0,
+                            "currencyID": "MYR"
+                        }
+                    ],
+                    "TaxInclusiveAmount": [
+                        {
+                            "_": 26.26,
+                            "currencyID": "MYR"
+                        }
+                    ],
+                    "AllowanceTotalAmount": [
+                        {
+                            "_": 1.0,
+                            "currencyID": "MYR"
+                        }
+                    ],
+                    "PayableAmount": [
+                        {
+                            "_": 26.26,
+                            "currencyID": "MYR"
+                        }
+                    ]
+                }
+            ]
+        }
+    ]
+}
