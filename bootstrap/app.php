@@ -3,6 +3,7 @@
 use App\Http\Middleware\AuthenticateApi;
 use App\Http\Middleware\EnsureAbility;
 use App\Http\Middleware\EnsureTenantContext;
+use App\Http\Middleware\IdempotencyKey;
 use App\Http\Problem\ProblemResponse;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -27,6 +28,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'auth.api' => AuthenticateApi::class,
             'tenant' => EnsureTenantContext::class,
             'ability' => EnsureAbility::class,
+            'idempotency' => IdempotencyKey::class,
         ]);
 
         // Implicit route-model binding (SubstituteBindings) runs before route
