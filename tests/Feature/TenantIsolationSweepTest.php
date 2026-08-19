@@ -3,8 +3,25 @@
 use App\Enums\Environment;
 use App\Models\ApiKey;
 use App\Models\Buyer;
+use App\Models\Document;
 use App\Models\Issuer;
 use App\Models\Tenant;
+use App\Tenancy\TenantContext;
+
+/**
+ * Documents get their tenant_id from the bound TenantContext (BelongsToTenant),
+ * not from a factory ->for() relation, so bind the context around the create and
+ * clear it again afterwards to avoid leaking it into the request under test.
+ */
+function documentFor(Tenant $t, Environment $environment = Environment::Sandbox): Document
+{
+    $issuer = Issuer::factory()->for($t)->create(['environment' => $environment]);
+    app(TenantContext::class)->bind($t, null, $environment);
+    $document = Document::factory()->for($issuer)->queued()->create(['environment' => $environment]);
+    app(TenantContext::class)->clear();
+
+    return $document;
+}
 
 /**
  * Every tenant-owned resource route must 404 for a different tenant.
@@ -19,6 +36,9 @@ dataset('cross_tenant_routes', function () {
         'buyer show' => [fn (Tenant $t) => Buyer::factory()->for($t)->create(), 'GET', '/v1/buyers/{id}'],
         'buyer update' => [fn (Tenant $t) => Buyer::factory()->for($t)->create(), 'PATCH', '/v1/buyers/{id}'],
         'api key revoke' => [fn (Tenant $t) => ApiKey::generate($t, 'k', Environment::Sandbox, ['read'])['key'], 'DELETE', '/v1/api-keys/{id}'],
+        'document show' => [fn (Tenant $t) => documentFor($t), 'GET', '/v1/documents/{id}'],
+        'document events' => [fn (Tenant $t) => documentFor($t), 'GET', '/v1/documents/{id}/events'],
+        'document submit' => [fn (Tenant $t) => documentFor($t), 'POST', '/v1/documents/{id}/submit'],
     ];
 });
 
@@ -41,6 +61,7 @@ dataset('cross_environment_routes', function () {
     return [
         'issuer show' => [fn (Tenant $t) => Issuer::factory()->for($t)->create(['environment' => Environment::Production]), 'GET', '/v1/issuers/{id}'],
         'api key revoke' => [fn (Tenant $t) => ApiKey::generate($t, 'k', Environment::Production, ['read'])['key'], 'DELETE', '/v1/api-keys/{id}'],
+        'document show (prod doc, test key)' => [fn (Tenant $t) => documentFor($t, Environment::Production), 'GET', '/v1/documents/{id}'],
     ];
 });
 

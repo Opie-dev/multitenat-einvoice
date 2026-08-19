@@ -2,6 +2,8 @@
 
 namespace App\Http\Problem;
 
+use App\Domain\Documents\CancellationWindowClosed;
+use App\Domain\Documents\InvalidTransition;
 use App\Exceptions\ProblemException;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Auth\AuthenticationException;
@@ -83,6 +85,12 @@ class ProblemResponse
         }
         if ($e instanceof NotFoundHttpException) {
             return [404, 'Not Found', 'Resource not found.', 'not_found', []];
+        }
+        if ($e instanceof InvalidTransition) {
+            return [409, 'Conflict', $e->getMessage(), 'invalid_transition', []];
+        }
+        if ($e instanceof CancellationWindowClosed) {
+            return [409, 'Conflict', $e->getMessage(), 'cancellation_window_closed', []];
         }
         if ($e instanceof HttpExceptionInterface) {
             $status = $e->getStatusCode();
