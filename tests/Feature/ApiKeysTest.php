@@ -1,0 +1,69 @@
+<?php
+
+use App\Enums\Environment;
+use App\Models\ApiKey;
+use App\Models\Tenant;
+
+it('creates an api key and shows the plaintext once', function () {
+    $tenant = Tenant::factory()->create();
+    $res = $this->withHeaders(serviceHeaders($tenant))
+        ->postJson('/v1/api-keys', ['name' => 'Shop backend', 'environment' => 'sandbox', 'abilities' => ['read', 'documents:write']])
+        ->assertCreated()
+        ->assertJsonPath('data.name', 'Shop backend')
+        ->assertJsonPath('data.environment', 'sandbox');
+    $plain = $res->json('data.key');
+    expect($plain)->toStartWith('ek_test_');
+    expect(ApiKey::withoutGlobalScopes()->where('key_hash', hash('sha256', $plain))->exists())->toBeTrue();
+
+    $list = $this->withHeaders(serviceHeaders($tenant))->getJson('/v1/api-keys')->assertOk();
+    expect($list->json('data.0'))->not->toHaveKey('key')->and($list->json('data.0.prefix'))->toBe(substr($plain, 0, 12));
+});
+
+it('rejects unknown abilities and invalid environment', function () {
+    $tenant = Tenant::factory()->create();
+    $this->withHeaders(serviceHeaders($tenant))
+        ->postJson('/v1/api-keys', ['name' => 'x', 'environment' => 'sandbox', 'abilities' => ['tenants:manage']])
+        ->assertStatus(422);
+    $this->withHeaders(serviceHeaders($tenant))
+        ->postJson('/v1/api-keys', ['name' => 'x', 'environment' => 'qa', 'abilities' => ['read']])
+        ->assertStatus(422);
+});
+
+it('authenticates with an api key bound to its tenant and environment', function () {
+    $tenant = Tenant::factory()->create();
+    ['plaintext' => $plain] = ApiKey::generate($tenant, 'k', Environment::Sandbox, ['read']);
+    $this->withHeaders(['Authorization' => "Bearer {$plain}", 'X-Tenant-Id' => Tenant::factory()->create()->id])
+        ->getJson('/v1/me')->assertOk()
+        ->assertJsonPath('data.tenant.id', $tenant->id)   // header ignored
+        ->assertJsonPath('data.environment', 'sandbox')
+        ->assertJsonPath('data.actor.type', 'api_key');
+});
+
+it('cannot list another tenant\'s keys', function () {
+    $a = Tenant::factory()->create();
+    $b = Tenant::factory()->create();
+    ApiKey::generate($a, 'a-key', Environment::Sandbox, ['read']);
+    $this->withHeaders(serviceHeaders($b))->getJson('/v1/api-keys')->assertOk()->assertJsonCount(0, 'data');
+});
+
+it('revokes a key so it no longer authenticates', function () {
+    $tenant = Tenant::factory()->create();
+    ['key' => $key, 'plaintext' => $plain] = ApiKey::generate($tenant, 'k', Environment::Production, ['read']);
+    $this->withHeaders(serviceHeaders($tenant))->deleteJson("/v1/api-keys/{$key->id}")->assertNoContent();
+    $this->withHeader('Authorization', "Bearer {$plain}")->getJson('/v1/me')->assertStatus(401);
+});
+
+it('returns 404 when revoking another tenant\'s key', function () {
+    $a = Tenant::factory()->create();
+    $b = Tenant::factory()->create();
+    ['key' => $key] = ApiKey::generate($a, 'k', Environment::Production, ['read']);
+    $this->withHeaders(serviceHeaders($b))->deleteJson("/v1/api-keys/{$key->id}")->assertStatus(404);
+});
+
+it('lets an api key with issuers:manage create more keys for its own tenant only', function () {
+    $tenant = Tenant::factory()->create();
+    $this->withHeaders(apiKeyHeaders($tenant))
+        ->postJson('/v1/api-keys', ['name' => 'child', 'environment' => 'sandbox', 'abilities' => ['read']])
+        ->assertCreated();
+    expect(ApiKey::withoutGlobalScopes()->where('tenant_id', $tenant->id)->count())->toBe(2);
+});

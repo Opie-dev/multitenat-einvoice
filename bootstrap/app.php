@@ -8,6 +8,7 @@ use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Request;
+use Illuminate\Routing\Middleware\SubstituteBindings;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -23,6 +24,14 @@ return Application::configure(basePath: dirname(__DIR__))
             'tenant' => EnsureTenantContext::class,
             'ability' => EnsureAbility::class,
         ]);
+
+        // Implicit route-model binding (SubstituteBindings) runs before route
+        // middleware by default. Tenant-scoped models (BelongsToTenant) rely on
+        // TenantContext being bound first, so authentication must run earlier.
+        $middleware->prependToPriorityList(
+            before: SubstituteBindings::class,
+            prepend: AuthenticateApi::class,
+        );
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(fn (Request $request, Throwable $e) => $request->is('v1/*') || $request->expectsJson());

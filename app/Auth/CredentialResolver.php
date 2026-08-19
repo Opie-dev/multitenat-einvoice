@@ -2,6 +2,7 @@
 
 namespace App\Auth;
 
+use App\Models\ApiKey;
 use App\Models\ServiceToken;
 
 class CredentialResolver
@@ -12,7 +13,11 @@ class CredentialResolver
             return $this->resolveServiceToken($bearer);
         }
 
-        return null; // 'ek_' API keys are added in Task 5
+        if (str_starts_with($bearer, 'ek_')) {
+            return $this->resolveApiKey($bearer);
+        }
+
+        return null;
     }
 
     private function resolveServiceToken(string $bearer): ?ResolvedCredential
@@ -30,6 +35,25 @@ class CredentialResolver
             tenant: null,
             environment: null,
             touch: fn () => $token->forceFill(['last_used_at' => now()])->saveQuietly(),
+        );
+    }
+
+    private function resolveApiKey(string $bearer): ?ResolvedCredential
+    {
+        $key = ApiKey::withoutGlobalScopes()
+            ->with('tenant')
+            ->where('key_hash', hash('sha256', $bearer))
+            ->whereNull('revoked_at')
+            ->first();
+        if ($key === null) {
+            return null;
+        }
+
+        return new ResolvedCredential(
+            actor: new Actor('api_key', $key->id, $key->prefix, $key->abilities),
+            tenant: $key->tenant,
+            environment: $key->environment,
+            touch: fn () => $key->forceFill(['last_used_at' => now()])->saveQuietly(),
         );
     }
 }

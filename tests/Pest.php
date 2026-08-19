@@ -1,5 +1,7 @@
 <?php
 
+use App\Enums\Environment;
+use App\Models\ApiKey;
 use App\Models\ServiceToken;
 use App\Models\Tenant;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -21,4 +23,12 @@ function serviceHeaders(Tenant $tenant, string $env = 'production', array $abili
         'X-Tenant-Id' => $tenant->id,
         'X-Environment' => $env,
     ];
+}
+
+/** @return array<string,string> */
+function apiKeyHeaders(Tenant $tenant, string $env = 'sandbox', array $abilities = ApiKey::ABILITIES): array
+{
+    ['plaintext' => $plain] = ApiKey::generate($tenant, 'test-key', Environment::from($env), $abilities);
+
+    return ['Authorization' => 'Bearer '.$plain];
 }
