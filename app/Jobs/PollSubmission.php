@@ -76,7 +76,7 @@ class PollSubmission implements ShouldQueue
         try {
             $status = $clients->for($issuer)->getSubmission($issuer, $this->submissionUid);
         } catch (LhdnException $e) {
-            $this->handleFailure($byUuid, $e, $stateMachine);
+            $this->handleFailure($byUuid, $e, $issuer, $clients, $stateMachine);
 
             return;
         }
@@ -120,7 +120,9 @@ class PollSubmission implements ShouldQueue
             return;
         }
 
-        // Already valid: react to the states LHDN can still move it to.
+        // Post-valid states (buyer rejection / LHDN-side cancellation) are only
+        // detected when a poll happens to see them; a dedicated status-refresh
+        // path is Plan 4.
         if ($state === 'rejected') {
             $stateMachine->transition($document, DocumentStatus::Rejected, 'buyer_rejected');
         } elseif ($state === 'cancelled' && $document->isCancellable()) {
@@ -149,35 +151,49 @@ class PollSubmission implements ShouldQueue
         return $errors;
     }
 
-    /** @param  array<string, Document>  $byUuid */
-    private function handleFailure(array $byUuid, LhdnException $e, DocumentStateMachine $stateMachine): void
+    /**
+     * A failure to *read* the submission is never a verdict on the documents in
+     * it: a 404/405/409 from `getSubmission` says something about our request or
+     * about MyInvois, not about whether the invoices are valid. So every kind
+     * except `auth` simply walks the poll curve, and only when the curve is
+     * exhausted do we ask LHDN about each document individually.
+     *
+     * @param  array<string, Document>  $byUuid
+     */
+    private function handleFailure(array $byUuid, LhdnException $e, Issuer $issuer, LhdnClientFactory $clients, DocumentStateMachine $stateMachine): void
     {
-        if ($e->kind === LhdnErrorKind::Terminal) {
-            $errors = SubmissionErrors::fromException($e);
-            foreach ($byUuid as $document) {
-                if ($document->status === DocumentStatus::Submitted) {
-                    $document->forceFill(['lhdn_errors' => $errors])->save();
-                    $stateMachine->transition($document, DocumentStatus::Invalid, 'rejected_by_lhdn', ['errors' => $errors]);
-                }
-            }
-
-            return;
-        }
         if ($e->kind === LhdnErrorKind::Auth) {
             return; // credentials are an issuer problem; the sweep retries once they are fixed
         }
+        if ($this->reschedule()) {
+            return;
+        }
 
-        $this->reschedule();
+        foreach ($byUuid as $uuid => $document) {
+            if ($document->status !== DocumentStatus::Submitted || $uuid === '') {
+                continue;
+            }
+            try {
+                $details = $clients->for($issuer)->getDocument($issuer, $uuid);
+            } catch (LhdnException) {
+                continue; // still unknown; the sweep re-polls this submission later
+            }
+            $summary = new DocumentSummary($uuid, (string) $document->lhdn_internal_id, $details->longId, $details->status, $details->validationErrors);
+            $this->apply($document, $summary, $issuer, $clients, $stateMachine);
+        }
     }
 
-    private function reschedule(): void
+    /** @return bool whether another poll was queued (false once the curve is spent) */
+    private function reschedule(): bool
     {
         $backoffs = array_values(array_map(intval(...), (array) config('lhdn.poll.backoff_seconds', [5])));
         $next = $this->attempt + 1;
         if ($next >= count($backoffs)) {
-            return; // give up for now; einvoice:lhdn-dispatch will poll again
+            return false; // give up for now; einvoice:lhdn-dispatch will poll again
         }
 
         self::dispatch($this->issuerId, $this->submissionUid, $next)->delay(now()->addSeconds($backoffs[$next]));
+
+        return true;
     }
 }

@@ -232,3 +232,50 @@ it('holds documents for an issuer that is no longer active', function () {
         ->and($doc->held_reason)->toBe(HeldReason::IssuerNotActive)
         ->and($doc->ubl_json)->toBeNull();
 });
+
+it('reschedules instead of invalidating when the submission read itself fails', function () {
+    Queue::fake([PollSubmission::class]);
+    $doc = pipelineDoc($this->issuer);
+    expect($doc->refresh()->status)->toBe(DocumentStatus::Submitted);
+
+    // A terminal status on getSubmission is a statement about our read, not about
+    // the invoice: it must never fabricate LHDN_4xx errors onto the documents.
+    fakeLhdn()->failNextWith(LhdnException::terminal('nf', 404), 'get_submission');
+    pipelinePoll($this->issuer, (string) $doc->lhdn_submission_uid, 0);
+
+    expect($doc->refresh()->status)->toBe(DocumentStatus::Submitted)->and($doc->lhdn_errors)->toBeNull();
+    Queue::assertPushed(PollSubmission::class, fn (PollSubmission $j) => $j->attempt === 1);
+
+    fakeLhdn()->failNextWith(LhdnException::transient('down', 503), 'get_submission');
+    pipelinePoll($this->issuer, (string) $doc->lhdn_submission_uid, 1);
+    expect($doc->refresh()->status)->toBe(DocumentStatus::Submitted)->and($doc->lhdn_errors)->toBeNull();
+    Queue::assertPushed(PollSubmission::class, fn (PollSubmission $j) => $j->attempt === 2);
+});
+
+it('asks LHDN about each document directly once the poll curve is exhausted', function () {
+    Queue::fake([PollSubmission::class]);
+    $doc = pipelineDoc($this->issuer);
+    expect($doc->refresh()->status)->toBe(DocumentStatus::Submitted);
+
+    // Flip the fake's own state to Valid without the job seeing it, so the
+    // per-document getDocument() call is the only thing that can settle it.
+    fakeLhdn()->getSubmission($this->issuer, (string) $doc->lhdn_submission_uid);
+
+    $last = count((array) config('lhdn.poll.backoff_seconds')) - 1;
+    fakeLhdn()->failNextWith(LhdnException::terminal('nf', 404), 'get_submission');
+    pipelinePoll($this->issuer, (string) $doc->lhdn_submission_uid, $last);
+
+    expect($doc->refresh()->status)->toBe(DocumentStatus::Valid)->and($doc->lhdn_long_id)->not->toBeNull();
+    Queue::assertNotPushed(PollSubmission::class, fn (PollSubmission $j) => $j->attempt > $last);
+});
+
+it('leaves a document submitted when the per-document check also fails', function () {
+    Queue::fake([PollSubmission::class]);
+    $doc = pipelineDoc($this->issuer);
+    $last = count((array) config('lhdn.poll.backoff_seconds')) - 1;
+    fakeLhdn()->failNextWith(LhdnException::terminal('nf', 404), 'get_submission');
+    fakeLhdn()->failNextWith(LhdnException::transient('down', 503), 'get_document');
+    pipelinePoll($this->issuer, (string) $doc->lhdn_submission_uid, $last);
+
+    expect($doc->refresh()->status)->toBe(DocumentStatus::Submitted)->and($doc->lhdn_errors)->toBeNull();
+});
