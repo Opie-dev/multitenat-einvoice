@@ -44,3 +44,13 @@ it('rejects an expired certificate', function () use ($fx) {
         Carbon::setTestNow();
     }
 })->throws(InvalidCertificate::class, 'certificate_expired');
+
+it('rejects a certificate that is not yet valid', function () use ($fx) {
+    // The fixture's notBefore is 2026-08-19; travel to before that.
+    Carbon::setTestNow('2020-01-01');
+    try {
+        (new CertificateParser)->fromPem($fx('test-cert.pem'), $fx('test-key.pem'), null);
+    } finally {
+        Carbon::setTestNow();
+    }
+})->throws(InvalidCertificate::class, 'certificate_not_yet_valid');

@@ -57,11 +57,11 @@ class IssuerSecret extends Model
 
     public function hasCredentials(): bool
     {
-        return $this->lhdn_client_id !== null && $this->lhdn_client_secret !== null;
+        return filled($this->lhdn_client_id) && filled($this->lhdn_client_secret);
     }
 
     public function hasCertificate(): bool
     {
-        return $this->signing_certificate !== null && $this->signing_key !== null;
+        return filled($this->signing_certificate) && filled($this->signing_key);
     }
 }
