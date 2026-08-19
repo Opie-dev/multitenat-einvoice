@@ -15,7 +15,7 @@ class ApiKeyController extends Controller
     /** @return CursorPaginatedDataCollection<int, ApiKeyData> */
     public function index(): CursorPaginatedDataCollection
     {
-        return ApiKeyData::collect(ApiKey::whereNull('revoked_at')->latest()->cursorPaginate(50), CursorPaginatedDataCollection::class);
+        return ApiKeyData::collect(ApiKey::whereNull('revoked_at')->orderByDesc('created_at')->orderByDesc('id')->cursorPaginate(50), CursorPaginatedDataCollection::class);
     }
 
     public function store(CreateApiKeyData $data, TenantContext $context): ApiKeyData

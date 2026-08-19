@@ -3,6 +3,7 @@
 use App\Enums\Environment;
 use App\Models\ApiKey;
 use App\Models\Tenant;
+use Illuminate\Support\Carbon;
 
 it('creates an api key and shows the plaintext once', function () {
     $tenant = Tenant::factory()->create();
@@ -66,4 +67,32 @@ it('lets an api key with issuers:manage create more keys for its own tenant only
         ->postJson('/v1/api-keys', ['name' => 'child', 'environment' => 'sandbox', 'abilities' => ['read']])
         ->assertCreated();
     expect(ApiKey::withoutGlobalScopes()->where('tenant_id', $tenant->id)->count())->toBe(2);
+});
+
+it('returns each key exactly once with a deterministic cursor order when created_at ties', function () {
+    $tenant = Tenant::factory()->create();
+    Carbon::setTestNow('2026-01-01 00:00:00');
+    $ids = [
+        ApiKey::generate($tenant, 'a', Environment::Sandbox, ['read'])['key']->id,
+        ApiKey::generate($tenant, 'b', Environment::Sandbox, ['read'])['key']->id,
+        ApiKey::generate($tenant, 'c', Environment::Sandbox, ['read'])['key']->id,
+    ];
+    Carbon::setTestNow();
+
+    $res = $this->withHeaders(serviceHeaders($tenant))->getJson('/v1/api-keys')->assertOk();
+
+    expect($res->json())->toHaveKeys(['data', 'links', 'meta']);
+    $returnedIds = collect($res->json('data'))->pluck('id')->all();
+    expect($returnedIds)->toHaveCount(3);
+    expect(array_unique($returnedIds))->toHaveCount(3);
+    expect($returnedIds)->toBe(collect($ids)->sortDesc()->values()->all());
+});
+
+it('requires X-Tenant-Id for a service token before route binding is attempted', function () {
+    $tenant = Tenant::factory()->create();
+    ['key' => $key] = ApiKey::generate($tenant, 'k', Environment::Production, ['read']);
+    $this->withHeaders(['Authorization' => 'Bearer '.serviceToken()])
+        ->deleteJson("/v1/api-keys/{$key->id}")
+        ->assertStatus(400)
+        ->assertJsonPath('code', 'tenant_header_required');
 });

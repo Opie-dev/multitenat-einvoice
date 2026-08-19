@@ -28,9 +28,16 @@ return Application::configure(basePath: dirname(__DIR__))
         // Implicit route-model binding (SubstituteBindings) runs before route
         // middleware by default. Tenant-scoped models (BelongsToTenant) rely on
         // TenantContext being bound first, so authentication must run earlier.
+        // Final order: AuthenticateApi -> EnsureTenantContext -> SubstituteBindings
+        // (EnsureAbility intentionally stays after SubstituteBindings, so a
+        // cross-tenant lookup 404s via the scoped binding rather than 403ing).
         $middleware->prependToPriorityList(
             before: SubstituteBindings::class,
             prepend: AuthenticateApi::class,
+        );
+        $middleware->prependToPriorityList(
+            before: SubstituteBindings::class,
+            prepend: EnsureTenantContext::class,
         );
     })
     ->withExceptions(function (Exceptions $exceptions): void {
