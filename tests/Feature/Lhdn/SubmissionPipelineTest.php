@@ -8,6 +8,7 @@ use App\Domain\Documents\DocumentStateMachine;
 use App\Enums\DocumentStatus;
 use App\Enums\Environment;
 use App\Enums\HeldReason;
+use App\Enums\IssuerStatus;
 use App\Jobs\PollSubmission;
 use App\Jobs\PrepareDocument;
 use App\Jobs\SubmitDocuments;
@@ -141,8 +142,9 @@ it('keeps polling with backoff while LHDN is in progress, and the scheduler swee
     $unprepared = Document::factory()->for($this->issuer)->queued()->create([
         'lhdn_internal_id' => 'UNP1', 'created_at' => now()->subMinutes(5),
     ]);
-    app(TenantContext::class)->clear();
     Artisan::call('einvoice:lhdn-dispatch');
+    // The sweep walks every tenant itself, but hands the caller's context back.
+    expect(app(TenantContext::class)->tenant()->id)->toBe($this->tenant->id);
     Queue::assertPushed(SubmitDocuments::class, fn (SubmitDocuments $j) => $j->issuerId === $this->issuer->id);
     Queue::assertPushed(PollSubmission::class, fn (PollSubmission $j) => $j->submissionUid === 'SUB-OLD');
     Queue::assertPushed(PrepareDocument::class, fn (PrepareDocument $j) => $j->documentId === $unprepared->id);
@@ -153,4 +155,45 @@ it('exposes the LHDN validation url once valid', function () {
     $doc = pipelineDoc($this->issuer)->refresh();
     $data = DocumentData::fromModel($doc)->toArray();
     expect($data['lhdn']['validation_url'])->toBe("https://preprod.myinvois.hasil.gov.my/{$doc->lhdn_uuid}/share/{$doc->lhdn_long_id}");
+});
+
+it('rejects a document whose encoded payload exceeds the LHDN per-document limit', function () {
+    // The signed invoice is comfortably under 1 KB raw but over it once base64 encoded.
+    config(['lhdn.submission.max_document_bytes' => 1024]);
+    Queue::fake([SubmitDocuments::class]);
+    $doc = pipelineDoc($this->issuer)->refresh();
+    expect($doc->status)->toBe(DocumentStatus::Invalid)
+        ->and($doc->ubl_json)->toBeNull()
+        ->and($doc->lhdn_errors[0]['code'])->toBe('DOC_TOO_LARGE')
+        ->and($doc->events()->get()->last()->reason)->toBe('document_too_large');
+    Queue::assertNotPushed(SubmitDocuments::class);
+});
+
+it('marks the whole batch invalid when LHDN rejects the submission outright', function () {
+    Queue::fake([SubmitDocuments::class, PollSubmission::class]);
+    $a = pipelineDoc($this->issuer);
+    $b = pipelineDoc($this->issuer);
+    fakeLhdn()->failNextWith(LhdnException::terminal('Invalid payload schema', 400), 'submit');
+    pipelineSubmit($this->issuer);
+
+    foreach ([$a, $b] as $doc) {
+        expect($doc->refresh()->status)->toBe(DocumentStatus::Invalid)
+            ->and($doc->lhdn_errors[0]['code'])->toBe('LHDN_400')
+            ->and($doc->lhdn_errors[0]['message'])->toBe('Invalid payload schema')
+            ->and($doc->last_submission_error['kind'])->toBe('terminal')
+            ->and($doc->submission_attempts_count)->toBe(1)
+            ->and($doc->events()->get()->last()->reason)->toBe('rejected_at_submission');
+    }
+});
+
+it('holds documents for an issuer that is no longer active', function () {
+    $doc = pipelineDoc($this->issuer, ['submit' => false]);
+    $this->issuer->forceFill(['status' => IssuerStatus::Draft])->save();
+    // Queued the way ReleaseHeldDocuments does it, bypassing the action's own
+    // issuer check, so PrepareDocument is the thing under test here.
+    app(DocumentStateMachine::class)->transition($doc, DocumentStatus::Queued, 'issuer_activated');
+
+    expect($doc->refresh()->status)->toBe(DocumentStatus::Held)
+        ->and($doc->held_reason)->toBe(HeldReason::IssuerNotActive)
+        ->and($doc->ubl_json)->toBeNull();
 });

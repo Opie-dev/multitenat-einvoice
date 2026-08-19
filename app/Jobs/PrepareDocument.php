@@ -6,6 +6,7 @@ use App\Domain\Documents\DocumentStateMachine;
 use App\Enums\DocumentStatus;
 use App\Enums\HeldReason;
 use App\Enums\IssuerStatus;
+use App\Lhdn\Data\SubmissionDocument;
 use App\Lhdn\LhdnException;
 use App\Lhdn\Pipeline\SubmissionErrors;
 use App\Lhdn\Signing\DocumentSigner;
@@ -62,10 +63,11 @@ class PrepareDocument implements ShouldQueue
             return;
         }
 
+        // LHDN's per-document limit applies to the base64 payload it receives, not the raw JSON.
         $max = (int) config('lhdn.submission.max_document_bytes', 307200);
-        $size = strlen($signed->json);
+        $size = SubmissionDocument::fromJson((string) $document->lhdn_internal_id, $signed->json)->wireSizeBytes();
         if ($size > $max) {
-            $errors = [['code' => 'DOC_TOO_LARGE', 'message' => "Signed document is {$size} bytes; the LHDN limit is {$max}."]];
+            $errors = [['code' => 'DOC_TOO_LARGE', 'message' => "Signed document is {$size} encoded bytes; the LHDN limit is {$max}."]];
             $document->forceFill(['lhdn_errors' => $errors])->save();
             $stateMachine->transition($document, DocumentStatus::Invalid, 'document_too_large', ['errors' => $errors]);
 

@@ -36,16 +36,27 @@ class LhdnDispatch extends Command
     public function handle(TenantContext $context): int
     {
         $dispatched = 0;
+        // Artisan::call() from a request or a test runs in whatever context the
+        // caller had bound; walking every tenant would otherwise leave theirs wiped.
+        $callerTenant = $context->tenantOrNull();
+        $callerActor = $context->actor();
+        $callerEnvironment = $context->environment();
 
-        foreach (Tenant::query()->cursor() as $tenant) {
-            foreach (Environment::cases() as $environment) {
-                $context->bind($tenant, new Actor('system', 'einvoice:lhdn-dispatch', 'lhdn-dispatch', ['*']), $environment);
+        try {
+            foreach (Tenant::query()->cursor() as $tenant) {
+                foreach (Environment::cases() as $environment) {
+                    $context->bind($tenant, new Actor('system', 'einvoice:lhdn-dispatch', 'lhdn-dispatch', ['*']), $environment);
 
-                try {
-                    $dispatched += $this->sweep($environment);
-                } finally {
-                    $context->clear();
+                    try {
+                        $dispatched += $this->sweep($environment);
+                    } finally {
+                        $context->clear();
+                    }
                 }
+            }
+        } finally {
+            if ($callerTenant !== null) {
+                $context->bind($callerTenant, $callerActor, $callerEnvironment);
             }
         }
 

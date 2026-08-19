@@ -46,7 +46,11 @@ class SubmitDocuments implements ShouldQueue
     {
         return [
             ...$this->tenantMiddleware(),
-            (new WithoutOverlapping("lhdn-submit:{$this->issuerId}"))->releaseAfter(30)->expireAfter(300),
+            // dontRelease, not releaseAfter: with tries = 1 a release would burn the
+            // job's only attempt and fail it before handle() ever runs. Dropping the
+            // overlapping dispatch is safe — the winner's tail re-dispatch and the
+            // einvoice:lhdn-dispatch sweep both pick the remaining documents back up.
+            (new WithoutOverlapping("lhdn-submit:{$this->issuerId}"))->dontRelease()->expireAfter(300),
         ];
     }
 
@@ -116,8 +120,9 @@ class SubmitDocuments implements ShouldQueue
 
     /**
      * Oldest first, capped by both the document count and the total payload size
-     * MyInvois accepts in one call. A single document larger than the byte cap is
-     * still sent alone — PrepareDocument already rejects the truly oversized ones.
+     * MyInvois accepts in one call — measured base64-encoded, the way LHDN counts
+     * it. A single document larger than the byte cap is still sent alone;
+     * PrepareDocument already rejects the truly oversized ones.
      *
      * @return Collection<int, Document>
      */
@@ -139,7 +144,7 @@ class SubmitDocuments implements ShouldQueue
         /** @var Collection<int, Document> $batch */
         $batch = collect();
         foreach ($candidates as $document) {
-            $size = strlen((string) $document->ubl_json);
+            $size = SubmissionDocument::fromJson((string) $document->lhdn_internal_id, (string) $document->ubl_json)->wireSizeBytes();
             if ($batch->isNotEmpty() && $bytes + $size > $maxBytes) {
                 break;
             }
