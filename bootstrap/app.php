@@ -1,8 +1,10 @@
 <?php
 
+use App\Http\Problem\ProblemResponse;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
+use Illuminate\Http\Request;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -16,5 +18,12 @@ return Application::configure(basePath: dirname(__DIR__))
         // aliases are added in Task 4
     })
     ->withExceptions(function (Exceptions $exceptions): void {
-        // problem+json rendering is added in Task 4
+        $exceptions->shouldRenderJsonWhen(fn (Request $request, Throwable $e) => $request->is('v1/*') || $request->expectsJson());
+        $exceptions->render(function (Throwable $e, Request $request) {
+            if ($request->is('v1/*') || $request->expectsJson()) {
+                return ProblemResponse::fromThrowable($e, $request);
+            }
+
+            return null;
+        });
     })->create();
