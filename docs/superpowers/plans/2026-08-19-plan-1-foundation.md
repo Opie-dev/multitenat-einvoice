@@ -21,6 +21,7 @@
 - Abilities: `read`, `documents:write`, `issuers:manage`, `webhooks:manage`, `tenants:manage` (service only), `*` (service only).
 - Environments: `sandbox` | `production`. `ek_test_` keys only touch `sandbox` issuers, `ek_live_` only `production`. Service tokens choose via `X-Environment` (default `production`).
 - Secret material (LHDN credentials, certificates, private keys, passphrases) is stored with Laravel `encrypted` casts and never serialised into API responses.
+- **API DTOs (user decision):** request validation and response serialisation use `spatie/laravel-data` (v4) `Data` classes — request DTOs in `app/Data/Requests/*Data.php` (injected into controller methods; validated automatically), response DTOs in `app/Data/Resources/*Data.php` (built with `fromModel()`). No `FormRequest` and no `JsonResource` classes anywhere. DTO properties are `snake_case` and map 1:1 to JSON keys. Single resources are returned as `->wrap('data')`; lists as `XData::collect($paginator)` (spatie paginated collection → `data`/`links`/`meta`). Data responses to `POST` are `201` automatically (spatie `ResponsableData`).
 - Timezone for business dates: `Asia/Kuala_Lumpur`; DB timestamps in UTC.
 - Tests: Pest, `php artisan test`. Static: `vendor/bin/pint --test`, `vendor/bin/phpstan analyse` (level 8). Both must pass before every commit.
 - Commit after every task with a conventional-commit message.
@@ -48,8 +49,9 @@ app/
     Middleware/
       AuthenticateApi.php  EnsureTenantContext.php  EnsureAbility.php
     Problem/ProblemResponse.php     builds problem+json from Throwable
-    Requests/…                      FormRequests per endpoint
-    Resources/…                     JsonResources per model
+  Data/
+    Requests/…Data.php              spatie/laravel-data request DTOs (validation)
+    Resources/…Data.php             spatie/laravel-data response DTOs (serialisation)
   Models/
     Tenant.php  ServiceToken.php  ApiKey.php  Issuer.php  IssuerSecret.php
     IssuerSecretHistory.php  Buyer.php  ReferenceCode.php  AuditLog.php
@@ -95,6 +97,7 @@ cp .env.example .env && php artisan key:generate
 
 ```bash
 composer require pestphp/pest pestphp/pest-plugin-laravel larastan/larastan --dev --with-all-dependencies --no-interaction
+composer require spatie/laravel-data --no-interaction
 php artisan pest:install --no-interaction
 rm -f tests/Feature/ExampleTest.php tests/Unit/ExampleTest.php
 ```
@@ -811,7 +814,7 @@ git add -A && git commit -m "feat(http): RFC 7807 problem+json error responses"
 ### Task 4: Service tokens, AuthenticateApi middleware, abilities, tenants endpoint
 
 **Files:**
-- Create: `app/Auth/Actor.php`, `app/Auth/ResolvedCredential.php`, `app/Auth/CredentialResolver.php`, `app/Models/ServiceToken.php`, `database/migrations/2026_08_19_000002_create_service_tokens_table.php`, `database/factories/ServiceTokenFactory.php`, `app/Console/Commands/CreateServiceToken.php`, `app/Http/Middleware/AuthenticateApi.php`, `app/Http/Middleware/EnsureTenantContext.php`, `app/Http/Middleware/EnsureAbility.php`, `app/Http/Controllers/Api/V1/MeController.php`, `app/Http/Controllers/Api/V1/TenantController.php`, `app/Http/Requests/StoreTenantRequest.php`, `app/Http/Resources/TenantResource.php`, `tests/Feature/Auth/ServiceTokenAuthTest.php`, `tests/Feature/TenantsTest.php`
+- Create: `app/Auth/Actor.php`, `app/Auth/ResolvedCredential.php`, `app/Auth/CredentialResolver.php`, `app/Models/ServiceToken.php`, `database/migrations/2026_08_19_000002_create_service_tokens_table.php`, `database/factories/ServiceTokenFactory.php`, `app/Console/Commands/CreateServiceToken.php`, `app/Http/Middleware/AuthenticateApi.php`, `app/Http/Middleware/EnsureTenantContext.php`, `app/Http/Middleware/EnsureAbility.php`, `app/Http/Controllers/Api/V1/MeController.php`, `app/Http/Controllers/Api/V1/TenantController.php`, `app/Data/Requests/CreateTenantData.php`, `app/Data/Resources/TenantData.php`, `app/Data/Resources/ActorData.php`, `app/Data/Resources/MeData.php`, `tests/Feature/Auth/ServiceTokenAuthTest.php`, `tests/Feature/TenantsTest.php`
 - Modify: `bootstrap/app.php` (aliases), `routes/api.php`, `app/Tenancy/TenantContext.php` (type `Actor`), `tests/Pest.php` (helpers)
 
 **Interfaces:**
@@ -1298,56 +1301,103 @@ Register aliases in `bootstrap/app.php`:
 })
 ```
 
-- [ ] **Step 6: Controllers, request, resource, routes**
+- [ ] **Step 6: DTOs, controllers, routes**
 
-`app/Http/Requests/StoreTenantRequest.php`
+`app/Data/Requests/CreateTenantData.php`
 ```php
 <?php
 
-namespace App\Http\Requests;
+namespace App\Data\Requests;
 
-use Illuminate\Foundation\Http\FormRequest;
+use Spatie\LaravelData\Attributes\Validation\Max;
+use Spatie\LaravelData\Attributes\Validation\Unique;
+use Spatie\LaravelData\Data;
 
-class StoreTenantRequest extends FormRequest
+class CreateTenantData extends Data
 {
-    public function authorize(): bool
-    {
-        return true;
-    }
+    public function __construct(
+        #[Max(255)]
+        public string $name,
+        #[Max(64), Unique('tenants', 'billplz_account_id')]
+        public ?string $billplz_account_id = null,
+    ) {}
+}
+```
+(spatie/laravel-data infers `required|string` from `string`, `nullable|string` from `?string`; a property with a default value is not `required`.)
 
-    /** @return array<string, mixed> */
-    public function rules(): array
+`app/Data/Resources/TenantData.php`
+```php
+<?php
+
+namespace App\Data\Resources;
+
+use App\Models\Tenant;
+use Spatie\LaravelData\Data;
+
+class TenantData extends Data
+{
+    public function __construct(
+        public string $id,
+        public string $name,
+        public ?string $billplz_account_id,
+        public string $status,
+        public ?string $created_at,
+    ) {}
+
+    public static function fromModel(Tenant $tenant): self
     {
-        return [
-            'name' => ['required', 'string', 'max:255'],
-            'billplz_account_id' => ['nullable', 'string', 'max:64', 'unique:tenants,billplz_account_id'],
-        ];
+        return new self(
+            id: $tenant->id,
+            name: $tenant->name,
+            billplz_account_id: $tenant->billplz_account_id,
+            status: $tenant->status,
+            created_at: $tenant->created_at?->toIso8601String(),
+        );
     }
 }
 ```
 
-`app/Http/Resources/TenantResource.php`
+`app/Data/Resources/ActorData.php`
 ```php
 <?php
 
-namespace App\Http\Resources;
+namespace App\Data\Resources;
 
-use Illuminate\Http\Request;
-use Illuminate\Http\Resources\Json\JsonResource;
+use App\Auth\Actor;
+use Spatie\LaravelData\Data;
 
-/** @mixin \App\Models\Tenant */
-class TenantResource extends JsonResource
+class ActorData extends Data
 {
-    public function toArray(Request $request): array
+    /** @param string[] $abilities */
+    public function __construct(
+        public string $type,
+        public string $id,
+        public string $name,
+        public array $abilities,
+    ) {}
+
+    public static function fromActor(Actor $actor): self
     {
-        return [
-            'id' => $this->id,
-            'name' => $this->name,
-            'billplz_account_id' => $this->billplz_account_id,
-            'status' => $this->status,
-            'created_at' => $this->created_at?->toIso8601String(),
-        ];
+        return new self($actor->type, $actor->id, $actor->name, $actor->abilities);
     }
+}
+```
+
+`app/Data/Resources/MeData.php`
+```php
+<?php
+
+namespace App\Data\Resources;
+
+use Spatie\LaravelData\Data;
+
+class MeData extends Data
+{
+    public function __construct(
+        public ?ActorData $actor,
+        public TenantData $tenant,
+        public string $environment,
+    ) {}
 }
 ```
 
@@ -1357,21 +1407,22 @@ class TenantResource extends JsonResource
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Data\Requests\CreateTenantData;
+use App\Data\Resources\TenantData;
 use App\Http\Controllers\Controller;
-use App\Http\Requests\StoreTenantRequest;
-use App\Http\Resources\TenantResource;
 use App\Models\Tenant;
 
 class TenantController extends Controller
 {
-    public function store(StoreTenantRequest $request): TenantResource
+    public function store(CreateTenantData $data): TenantData
     {
-        $tenant = Tenant::create($request->validated());
+        $tenant = Tenant::create($data->toArray());
 
-        return new TenantResource($tenant);
+        return TenantData::fromModel($tenant)->wrap('data');
     }
 }
 ```
+(Injecting a `Data` subclass into a controller method makes spatie/laravel-data build it from the request and validate it; failures throw `ValidationException`, rendered by Task 3 as problem+json. `POST` responses from a `Data` return `201`.)
 
 `app/Http/Controllers/Api/V1/MeController.php`
 ```php
@@ -1379,27 +1430,23 @@ class TenantController extends Controller
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Data\Resources\ActorData;
+use App\Data\Resources\MeData;
+use App\Data\Resources\TenantData;
 use App\Http\Controllers\Controller;
-use App\Http\Resources\TenantResource;
 use App\Tenancy\TenantContext;
-use Illuminate\Http\JsonResponse;
 
 class MeController extends Controller
 {
-    public function __invoke(TenantContext $context): JsonResponse
+    public function __invoke(TenantContext $context): MeData
     {
         $actor = $context->actor();
 
-        return response()->json(['data' => [
-            'actor' => $actor === null ? null : [
-                'type' => $actor->type,
-                'id' => $actor->id,
-                'name' => $actor->name,
-                'abilities' => $actor->abilities,
-            ],
-            'tenant' => (new TenantResource($context->tenant()))->resolve(),
-            'environment' => $context->environment()->value,
-        ]]);
+        return (new MeData(
+            actor: $actor === null ? null : ActorData::fromActor($actor),
+            tenant: TenantData::fromModel($context->tenant()),
+            environment: $context->environment()->value,
+        ))->wrap('data');
     }
 }
 ```
@@ -1440,7 +1487,7 @@ git add -A && git commit -m "feat(auth): service tokens, AuthenticateApi, abilit
 ### Task 5: API keys (model, resolver branch, endpoints)
 
 **Files:**
-- Create: `app/Models/ApiKey.php`, `database/migrations/2026_08_19_000003_create_api_keys_table.php`, `database/factories/ApiKeyFactory.php`, `app/Http/Controllers/Api/V1/ApiKeyController.php`, `app/Http/Requests/StoreApiKeyRequest.php`, `app/Http/Resources/ApiKeyResource.php`, `tests/Feature/ApiKeysTest.php`
+- Create: `app/Models/ApiKey.php`, `database/migrations/2026_08_19_000003_create_api_keys_table.php`, `database/factories/ApiKeyFactory.php`, `app/Http/Controllers/Api/V1/ApiKeyController.php`, `app/Data/Requests/CreateApiKeyData.php`, `app/Data/Resources/ApiKeyData.php`, `tests/Feature/ApiKeysTest.php`
 - Modify: `app/Auth/CredentialResolver.php`, `routes/api.php`, `tests/Pest.php`
 
 **Interfaces:**
@@ -1696,75 +1743,90 @@ private function resolveApiKey(string $bearer): ?ResolvedCredential
 ```
 (add `use App\Models\ApiKey;`).
 
-- [ ] **Step 5: Request, resource, controller, routes**
+- [ ] **Step 5: DTOs, controller, routes**
 
-`app/Http/Requests/StoreApiKeyRequest.php`
+`app/Data/Requests/CreateApiKeyData.php`
 ```php
 <?php
 
-namespace App\Http\Requests;
+namespace App\Data\Requests;
 
 use App\Enums\Environment;
 use App\Models\ApiKey;
-use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
+use Spatie\LaravelData\Attributes\Validation\Max;
+use Spatie\LaravelData\Data;
+use Spatie\LaravelData\Support\Validation\ValidationContext;
 
-class StoreApiKeyRequest extends FormRequest
+class CreateApiKeyData extends Data
 {
-    public function authorize(): bool
-    {
-        return true;
-    }
+    /** @param string[] $abilities */
+    public function __construct(
+        #[Max(255)]
+        public string $name,
+        public Environment $environment,
+        public array $abilities,
+    ) {}
 
     /** @return array<string, mixed> */
-    public function rules(): array
+    public static function rules(ValidationContext $context): array
     {
         return [
-            'name' => ['required', 'string', 'max:255'],
-            'environment' => ['required', Rule::enum(Environment::class)],
             'abilities' => ['required', 'array', 'min:1'],
             'abilities.*' => ['string', Rule::in(ApiKey::ABILITIES)],
         ];
     }
 }
 ```
+(An enum-typed property gets an automatic `Enum` rule and is cast to the enum.)
 
-`app/Http/Resources/ApiKeyResource.php`
+`app/Data/Resources/ApiKeyData.php`
 ```php
 <?php
 
-namespace App\Http\Resources;
+namespace App\Data\Resources;
 
-use Illuminate\Http\Request;
-use Illuminate\Http\Resources\Json\JsonResource;
+use App\Models\ApiKey;
+use Spatie\LaravelData\Data;
+use Spatie\LaravelData\Optional;
 
-/** @mixin \App\Models\ApiKey */
-class ApiKeyResource extends JsonResource
+class ApiKeyData extends Data
 {
-    public function __construct($resource, private readonly ?string $plaintext = null)
+    /** @param string[] $abilities */
+    public function __construct(
+        public string $id,
+        public string $name,
+        public string $prefix,
+        public string $environment,
+        public array $abilities,
+        public ?string $last_used_at,
+        public ?string $created_at,
+        public string|Optional $key, // plaintext — present only on creation
+    ) {}
+
+    public static function fromModel(ApiKey $key): self
     {
-        parent::__construct($resource);
+        return new self(
+            id: $key->id,
+            name: $key->name,
+            prefix: $key->prefix,
+            environment: $key->environment->value,
+            abilities: $key->abilities,
+            last_used_at: $key->last_used_at?->toIso8601String(),
+            created_at: $key->created_at?->toIso8601String(),
+            key: Optional::create(),
+        );
     }
 
-    public function toArray(Request $request): array
+    public function withPlaintext(string $plaintext): self
     {
-        $data = [
-            'id' => $this->id,
-            'name' => $this->name,
-            'prefix' => $this->prefix,
-            'environment' => $this->environment->value,
-            'abilities' => $this->abilities,
-            'last_used_at' => $this->last_used_at?->toIso8601String(),
-            'created_at' => $this->created_at?->toIso8601String(),
-        ];
-        if ($this->plaintext !== null) {
-            $data['key'] = $this->plaintext; // shown once, on creation only
-        }
+        $this->key = $plaintext;
 
-        return $data;
+        return $this;
     }
 }
 ```
+(`Optional` values are omitted from the serialised output; `fromModel` keeps a single typed parameter so spatie's `collect()`/`from()` can resolve it.)
 
 `app/Http/Controllers/Api/V1/ApiKeyController.php`
 ```php
@@ -1772,32 +1834,32 @@ class ApiKeyResource extends JsonResource
 
 namespace App\Http\Controllers\Api\V1;
 
-use App\Enums\Environment;
+use App\Data\Requests\CreateApiKeyData;
+use App\Data\Resources\ApiKeyData;
 use App\Http\Controllers\Controller;
-use App\Http\Requests\StoreApiKeyRequest;
-use App\Http\Resources\ApiKeyResource;
 use App\Models\ApiKey;
 use App\Tenancy\TenantContext;
-use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Http\Response;
+use Spatie\LaravelData\CursorPaginatedDataCollection;
 
 class ApiKeyController extends Controller
 {
-    public function index(): AnonymousResourceCollection
+    /** @return CursorPaginatedDataCollection<int, ApiKeyData> */
+    public function index(): CursorPaginatedDataCollection
     {
-        return ApiKeyResource::collection(ApiKey::whereNull('revoked_at')->latest()->cursorPaginate(50));
+        return ApiKeyData::collect(ApiKey::whereNull('revoked_at')->latest()->cursorPaginate(50), CursorPaginatedDataCollection::class);
     }
 
-    public function store(StoreApiKeyRequest $request, TenantContext $context): ApiKeyResource
+    public function store(CreateApiKeyData $data, TenantContext $context): ApiKeyData
     {
         ['key' => $key, 'plaintext' => $plaintext] = ApiKey::generate(
             $context->tenant(),
-            $request->string('name')->toString(),
-            Environment::from($request->string('environment')->toString()),
-            $request->array('abilities'),
+            $data->name,
+            $data->environment,
+            $data->abilities,
         );
 
-        return (new ApiKeyResource($key, $plaintext))->additional([]);
+        return ApiKeyData::fromModel($key)->withPlaintext($plaintext)->wrap('data');
     }
 
     public function destroy(ApiKey $apiKey): Response
@@ -1808,7 +1870,7 @@ class ApiKeyController extends Controller
     }
 }
 ```
-Note: `store()` returns 201 automatically because a freshly created model's `wasRecentlyCreated` is true.
+Notes: `Data` responses to `POST` are `201` (spatie `ResponsableData`). `collect(..., CursorPaginatedDataCollection::class)` serialises as `{data: [...], links: {...}, meta: {...}}` — the `data` key the tests assert on. `ApiKeyData::collect` uses `fromModel(ApiKey)` for each item because spatie resolves `from*` factory methods by parameter type.
 
 Routes — inside the `tenant` group in `routes/api.php`:
 ```php
@@ -1835,7 +1897,7 @@ git add -A && git commit -m "feat(auth): tenant-scoped API keys with abilities a
 ### Task 6: Issuers (enums, model, CRUD, environment enforcement)
 
 **Files:**
-- Create: `app/Enums/IdType.php`, `app/Enums/IssuerStatus.php`, `app/Enums/LhdnMode.php`, `app/Models/Issuer.php`, `database/migrations/2026_08_19_000004_create_issuers_table.php`, `database/factories/IssuerFactory.php`, `app/Http/Requests/StoreIssuerRequest.php`, `app/Http/Requests/UpdateIssuerRequest.php`, `app/Http/Resources/IssuerResource.php`, `app/Http/Controllers/Api/V1/IssuerController.php`, `app/Services/Issuers/IssuerActivator.php`, `tests/Feature/IssuersTest.php`, `tests/Unit/Issuers/IssuerActivatorTest.php`
+- Create: `app/Enums/IdType.php`, `app/Enums/IssuerStatus.php`, `app/Enums/LhdnMode.php`, `app/Models/Issuer.php`, `database/migrations/2026_08_19_000004_create_issuers_table.php`, `database/factories/IssuerFactory.php`, `app/Data/Requests/CreateIssuerData.php`, `app/Data/Requests/UpdateIssuerData.php`, `app/Data/Resources/AddressData.php`, `app/Data/Resources/CertificateMetaData.php`, `app/Data/Resources/IssuerData.php`, `app/Http/Controllers/Api/V1/IssuerController.php`, `app/Services/Issuers/IssuerActivator.php`, `tests/Feature/IssuersTest.php`, `tests/Unit/Issuers/IssuerActivatorTest.php`
 - Modify: `routes/api.php`
 
 **Interfaces:**
@@ -2230,160 +2292,226 @@ class IssuerActivator
 }
 ```
 
-- [ ] **Step 6: Requests, resource, controller, routes**
+- [ ] **Step 6: DTOs, controller, routes**
 
-`app/Http/Requests/StoreIssuerRequest.php`
+`app/Data/Requests/CreateIssuerData.php`
 ```php
 <?php
 
-namespace App\Http\Requests;
+namespace App\Data\Requests;
 
 use App\Enums\IdType;
 use App\Enums\LhdnMode;
-use Illuminate\Foundation\Http\FormRequest;
-use Illuminate\Validation\Rule;
+use Spatie\LaravelData\Attributes\Validation\Digits;
+use Spatie\LaravelData\Attributes\Validation\Email;
+use Spatie\LaravelData\Attributes\Validation\Max;
+use Spatie\LaravelData\Attributes\Validation\Regex;
+use Spatie\LaravelData\Attributes\Validation\Size;
+use Spatie\LaravelData\Data;
 
-class StoreIssuerRequest extends FormRequest
+class CreateIssuerData extends Data
 {
-    public function authorize(): bool
-    {
-        return true;
-    }
-
-    /** @return array<string, mixed> */
-    public function rules(): array
-    {
-        return [
-            'name' => ['required', 'string', 'max:255'],
-            'tin' => ['required', 'string', 'regex:/^[A-Z]{1,2}[0-9]{10,12}$/'],
-            'id_type' => ['required', Rule::enum(IdType::class)],
-            'id_number' => ['required', 'string', 'max:30'],
-            'sst_number' => ['nullable', 'string', 'max:40'],
-            'tourism_tax_number' => ['nullable', 'string', 'max:40'],
-            'msic_code' => ['required', 'digits:5'],
-            'business_activity_description' => ['required', 'string', 'max:300'],
-            'address_line1' => ['required', 'string', 'max:150'],
-            'address_line2' => ['nullable', 'string', 'max:150'],
-            'address_line3' => ['nullable', 'string', 'max:150'],
-            'postcode' => ['required', 'string', 'max:10'],
-            'city' => ['required', 'string', 'max:50'],
-            'state_code' => ['required', 'string', 'size:2'],
-            'country_code' => ['sometimes', 'string', 'size:3'],
-            'email' => ['required', 'email', 'max:320'],
-            'phone' => ['required', 'string', 'max:20'],
-            'lhdn_mode' => ['required', Rule::enum(LhdnMode::class)],
-            'einvoice_required' => ['sometimes', 'boolean'],
-            'consolidation_enabled' => ['sometimes', 'boolean'],
-        ];
-    }
+    public function __construct(
+        #[Max(255)] public string $name,
+        #[Regex('/^[A-Z]{1,2}[0-9]{10,12}$/')] public string $tin,
+        public IdType $id_type,
+        #[Max(30)] public string $id_number,
+        #[Digits(5)] public string $msic_code,
+        #[Max(300)] public string $business_activity_description,
+        #[Max(150)] public string $address_line1,
+        #[Max(10)] public string $postcode,
+        #[Max(50)] public string $city,
+        #[Size(2)] public string $state_code,
+        #[Email, Max(320)] public string $email,
+        #[Max(20)] public string $phone,
+        public LhdnMode $lhdn_mode,
+        #[Max(40)] public ?string $sst_number = null,
+        #[Max(40)] public ?string $tourism_tax_number = null,
+        #[Max(150)] public ?string $address_line2 = null,
+        #[Max(150)] public ?string $address_line3 = null,
+        #[Size(3)] public string $country_code = 'MYS',
+        public bool $einvoice_required = true,
+        public bool $consolidation_enabled = false,
+    ) {}
 }
 ```
 
-`app/Http/Requests/UpdateIssuerRequest.php`
+`app/Data/Requests/UpdateIssuerData.php` — TIN, id_type, id_number and environment are immutable after creation (create a new issuer instead). Every property is `Optional` so `PATCH` sends only what changes; `toArray()` omits `Optional` values.
 ```php
 <?php
 
-namespace App\Http\Requests;
+namespace App\Data\Requests;
 
 use App\Enums\LhdnMode;
-use Illuminate\Foundation\Http\FormRequest;
-use Illuminate\Validation\Rule;
+use Spatie\LaravelData\Attributes\Validation\Digits;
+use Spatie\LaravelData\Attributes\Validation\Email;
+use Spatie\LaravelData\Attributes\Validation\Max;
+use Spatie\LaravelData\Attributes\Validation\Size;
+use Spatie\LaravelData\Data;
+use Spatie\LaravelData\Optional;
 
-class UpdateIssuerRequest extends FormRequest
+class UpdateIssuerData extends Data
 {
-    public function authorize(): bool
-    {
-        return true;
-    }
-
-    /** @return array<string, mixed> */
-    public function rules(): array
-    {
-        return [
-            'name' => ['sometimes', 'string', 'max:255'],
-            'sst_number' => ['nullable', 'string', 'max:40'],
-            'tourism_tax_number' => ['nullable', 'string', 'max:40'],
-            'msic_code' => ['sometimes', 'digits:5'],
-            'business_activity_description' => ['sometimes', 'string', 'max:300'],
-            'address_line1' => ['sometimes', 'string', 'max:150'],
-            'address_line2' => ['nullable', 'string', 'max:150'],
-            'address_line3' => ['nullable', 'string', 'max:150'],
-            'postcode' => ['sometimes', 'string', 'max:10'],
-            'city' => ['sometimes', 'string', 'max:50'],
-            'state_code' => ['sometimes', 'string', 'size:2'],
-            'country_code' => ['sometimes', 'string', 'size:3'],
-            'email' => ['sometimes', 'email', 'max:320'],
-            'phone' => ['sometimes', 'string', 'max:20'],
-            'lhdn_mode' => ['sometimes', Rule::enum(LhdnMode::class)],
-            'einvoice_required' => ['sometimes', 'boolean'],
-            'consolidation_enabled' => ['sometimes', 'boolean'],
-        ];
-    }
+    public function __construct(
+        #[Max(255)] public string|Optional $name,
+        #[Max(40)] public string|Optional|null $sst_number,
+        #[Max(40)] public string|Optional|null $tourism_tax_number,
+        #[Digits(5)] public string|Optional $msic_code,
+        #[Max(300)] public string|Optional $business_activity_description,
+        #[Max(150)] public string|Optional $address_line1,
+        #[Max(150)] public string|Optional|null $address_line2,
+        #[Max(150)] public string|Optional|null $address_line3,
+        #[Max(10)] public string|Optional $postcode,
+        #[Max(50)] public string|Optional $city,
+        #[Size(2)] public string|Optional $state_code,
+        #[Size(3)] public string|Optional $country_code,
+        #[Email, Max(320)] public string|Optional $email,
+        #[Max(20)] public string|Optional $phone,
+        public LhdnMode|Optional $lhdn_mode,
+        public bool|Optional $einvoice_required,
+        public bool|Optional $consolidation_enabled,
+    ) {}
 }
 ```
-(TIN, id_type, id_number and environment are immutable after creation — a new issuer must be created instead.)
+(`string|Optional` infers `sometimes|string`; `string|Optional|null` infers `sometimes|nullable|string`.)
 
-`app/Http/Resources/IssuerResource.php`
+`app/Data/Resources/AddressData.php`
 ```php
 <?php
 
-namespace App\Http\Resources;
+namespace App\Data\Resources;
 
-use Illuminate\Http\Request;
-use Illuminate\Http\Resources\Json\JsonResource;
+use Spatie\LaravelData\Data;
 
-/** @mixin \App\Models\Issuer */
-class IssuerResource extends JsonResource
+class AddressData extends Data
 {
-    public function toArray(Request $request): array
-    {
-        $secret = $this->relationLoaded('secret') ? $this->secret : $this->secret()->first();
+    public function __construct(
+        public ?string $line1,
+        public ?string $line2,
+        public ?string $line3,
+        public ?string $postcode,
+        public ?string $city,
+        public ?string $state_code,
+        public ?string $country_code,
+    ) {}
+}
+```
 
-        return [
-            'id' => $this->id,
-            'name' => $this->name,
-            'tin' => $this->tin,
-            'id_type' => $this->id_type->value,
-            'id_number' => $this->id_number,
-            'sst_number' => $this->sst_number,
-            'tourism_tax_number' => $this->tourism_tax_number,
-            'msic_code' => $this->msic_code,
-            'business_activity_description' => $this->business_activity_description,
-            'address' => [
-                'line1' => $this->address_line1,
-                'line2' => $this->address_line2,
-                'line3' => $this->address_line3,
-                'postcode' => $this->postcode,
-                'city' => $this->city,
-                'state_code' => $this->state_code,
-                'country_code' => $this->country_code,
-            ],
-            'email' => $this->email,
-            'phone' => $this->phone,
-            'environment' => $this->environment->value,
-            'lhdn_mode' => $this->lhdn_mode->value,
-            'einvoice_required' => $this->einvoice_required,
-            'consolidation_enabled' => $this->consolidation_enabled,
-            'status' => $this->status->value,
-            'has_credentials' => (bool) ($secret?->hasCredentials() ?? false),
-            'has_certificate' => (bool) ($secret?->hasCertificate() ?? false),
-            'certificate' => $secret?->hasCertificate() ? [
-                'subject' => $secret->cert_subject,
-                'serial' => $secret->cert_serial,
-                'fingerprint' => $secret->cert_fingerprint,
-                'not_before' => $secret->cert_not_before?->toIso8601String(),
-                'not_after' => $secret->cert_not_after?->toIso8601String(),
-            ] : null,
-            'tin_verified_at' => $this->tin_verified_at?->toIso8601String(),
-            'authorized_at' => $this->authorized_at?->toIso8601String(),
-            'activated_at' => $this->activated_at?->toIso8601String(),
-            'created_at' => $this->created_at?->toIso8601String(),
-            'updated_at' => $this->updated_at?->toIso8601String(),
-        ];
+`app/Data/Resources/CertificateMetaData.php`
+```php
+<?php
+
+namespace App\Data\Resources;
+
+use App\Models\IssuerSecret;
+use Spatie\LaravelData\Data;
+
+class CertificateMetaData extends Data
+{
+    public function __construct(
+        public ?string $subject,
+        public ?string $serial,
+        public ?string $fingerprint,
+        public ?string $not_before,
+        public ?string $not_after,
+    ) {}
+
+    public static function fromSecret(IssuerSecret $secret): self
+    {
+        return new self(
+            subject: $secret->cert_subject,
+            serial: $secret->cert_serial,
+            fingerprint: $secret->cert_fingerprint,
+            not_before: $secret->cert_not_before?->toIso8601String(),
+            not_after: $secret->cert_not_after?->toIso8601String(),
+        );
     }
 }
 ```
-For Task 6 to compile, give the placeholder `IssuerSecret` model these two methods returning `false`: `hasCredentials(): bool`, `hasCertificate(): bool`, and `protected $casts` empty. Task 7 replaces the whole file.
+
+`app/Data/Resources/IssuerData.php`
+```php
+<?php
+
+namespace App\Data\Resources;
+
+use App\Models\Issuer;
+use Spatie\LaravelData\Data;
+
+class IssuerData extends Data
+{
+    public function __construct(
+        public string $id,
+        public string $name,
+        public string $tin,
+        public string $id_type,
+        public string $id_number,
+        public ?string $sst_number,
+        public ?string $tourism_tax_number,
+        public string $msic_code,
+        public string $business_activity_description,
+        public AddressData $address,
+        public string $email,
+        public string $phone,
+        public string $environment,
+        public string $lhdn_mode,
+        public bool $einvoice_required,
+        public bool $consolidation_enabled,
+        public string $status,
+        public bool $has_credentials,
+        public bool $has_certificate,
+        public ?CertificateMetaData $certificate,
+        public ?string $tin_verified_at,
+        public ?string $authorized_at,
+        public ?string $activated_at,
+        public ?string $created_at,
+        public ?string $updated_at,
+    ) {}
+
+    public static function fromModel(Issuer $issuer): self
+    {
+        $secret = $issuer->relationLoaded('secret') ? $issuer->secret : $issuer->secret()->first();
+        $hasCertificate = $secret?->hasCertificate() ?? false;
+
+        return new self(
+            id: $issuer->id,
+            name: $issuer->name,
+            tin: $issuer->tin,
+            id_type: $issuer->id_type->value,
+            id_number: $issuer->id_number,
+            sst_number: $issuer->sst_number,
+            tourism_tax_number: $issuer->tourism_tax_number,
+            msic_code: $issuer->msic_code,
+            business_activity_description: $issuer->business_activity_description,
+            address: new AddressData(
+                line1: $issuer->address_line1,
+                line2: $issuer->address_line2,
+                line3: $issuer->address_line3,
+                postcode: $issuer->postcode,
+                city: $issuer->city,
+                state_code: $issuer->state_code,
+                country_code: $issuer->country_code,
+            ),
+            email: $issuer->email,
+            phone: $issuer->phone,
+            environment: $issuer->environment->value,
+            lhdn_mode: $issuer->lhdn_mode->value,
+            einvoice_required: $issuer->einvoice_required,
+            consolidation_enabled: $issuer->consolidation_enabled,
+            status: $issuer->status->value,
+            has_credentials: $secret?->hasCredentials() ?? false,
+            has_certificate: $hasCertificate,
+            certificate: $hasCertificate && $secret !== null ? CertificateMetaData::fromSecret($secret) : null,
+            tin_verified_at: $issuer->tin_verified_at?->toIso8601String(),
+            authorized_at: $issuer->authorized_at?->toIso8601String(),
+            activated_at: $issuer->activated_at?->toIso8601String(),
+            created_at: $issuer->created_at?->toIso8601String(),
+            updated_at: $issuer->updated_at?->toIso8601String(),
+        );
+    }
+}
+```
+For Task 6 to compile, give the placeholder `IssuerSecret` model these two methods returning `false`: `hasCredentials(): bool`, `hasCertificate(): bool`, plus nullable `cert_subject`, `cert_serial`, `cert_fingerprint` (`?string`) and `cert_not_before`, `cert_not_after` (`?\Illuminate\Support\Carbon`) declared via `@property` docblocks so PHPStan is satisfied. Task 7 replaces the whole file.
 
 `app/Http/Controllers/Api/V1/IssuerController.php`
 ```php
@@ -2391,47 +2519,50 @@ For Task 6 to compile, give the placeholder `IssuerSecret` model these two metho
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Data\Requests\CreateIssuerData;
+use App\Data\Requests\UpdateIssuerData;
+use App\Data\Resources\IssuerData;
 use App\Exceptions\ProblemException;
 use App\Http\Controllers\Controller;
-use App\Http\Requests\StoreIssuerRequest;
-use App\Http\Requests\UpdateIssuerRequest;
-use App\Http\Resources\IssuerResource;
 use App\Models\Issuer;
 use App\Tenancy\TenantContext;
-use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
+use Spatie\LaravelData\CursorPaginatedDataCollection;
 
 class IssuerController extends Controller
 {
-    public function index(): AnonymousResourceCollection
+    /** @return CursorPaginatedDataCollection<int, IssuerData> */
+    public function index(): CursorPaginatedDataCollection
     {
-        return IssuerResource::collection(Issuer::forCurrentEnvironment()->with('secret')->latest()->cursorPaginate(50));
+        return IssuerData::collect(
+            Issuer::forCurrentEnvironment()->with('secret')->latest()->cursorPaginate(50),
+            CursorPaginatedDataCollection::class,
+        );
     }
 
-    public function store(StoreIssuerRequest $request, TenantContext $context): IssuerResource
+    public function store(CreateIssuerData $data, TenantContext $context): IssuerData
     {
-        $data = $request->validated();
-        $exists = Issuer::forCurrentEnvironment()->where('tin', $data['tin'])->exists();
-        if ($exists) {
+        if (Issuer::forCurrentEnvironment()->where('tin', $data->tin)->exists()) {
             throw ProblemException::conflict('An issuer with this TIN already exists in this environment.', 'issuer_exists');
         }
-        $issuer = Issuer::create($data + ['environment' => $context->environment()]);
+        $issuer = Issuer::create($data->toArray() + ['environment' => $context->environment()]);
 
-        return new IssuerResource($issuer);
+        return IssuerData::fromModel($issuer)->wrap('data');
     }
 
-    public function show(Issuer $issuer): IssuerResource
+    public function show(Issuer $issuer): IssuerData
     {
-        return new IssuerResource($issuer->load('secret'));
+        return IssuerData::fromModel($issuer->load('secret'))->wrap('data');
     }
 
-    public function update(UpdateIssuerRequest $request, Issuer $issuer): IssuerResource
+    public function update(UpdateIssuerData $data, Issuer $issuer): IssuerData
     {
-        $issuer->update($request->validated());
+        $issuer->update($data->toArray());
 
-        return new IssuerResource($issuer->fresh('secret'));
+        return IssuerData::fromModel($issuer->fresh('secret'))->wrap('data');
     }
 }
 ```
+(`$data->toArray()` transforms enums to their backing values and omits `Optional` properties, so it can be passed straight to Eloquent.)
 
 Route-model binding must also apply the environment scope. Add to `Issuer`:
 ```php
@@ -2469,7 +2600,7 @@ git add -A && git commit -m "feat(issuers): issuer model, CRUD API, environment 
 ### Task 7: Issuer secrets — LHDN credentials and signing certificate upload
 
 **Files:**
-- Create: `database/migrations/2026_08_19_000005_create_issuer_secrets_table.php`, `database/migrations/2026_08_19_000006_create_issuer_secret_histories_table.php`, `app/Models/IssuerSecret.php` (replace placeholder), `app/Models/IssuerSecretHistory.php`, `app/Services/Certificates/CertificateInfo.php`, `app/Services/Certificates/CertificateParser.php`, `app/Services/Certificates/InvalidCertificate.php`, `app/Http/Requests/PutIssuerCredentialsRequest.php`, `app/Http/Requests/PutIssuerCertificateRequest.php`, `app/Http/Controllers/Api/V1/IssuerCredentialsController.php`, `app/Http/Controllers/Api/V1/IssuerCertificateController.php`, `tests/Fixtures/certs/test-cert.pem`, `tests/Fixtures/certs/test-key.pem`, `tests/Fixtures/certs/test.p12`, `tests/Fixtures/certs/other-key.pem`, `tests/Unit/Certificates/CertificateParserTest.php`, `tests/Feature/IssuerSecretsTest.php`
+- Create: `database/migrations/2026_08_19_000005_create_issuer_secrets_table.php`, `database/migrations/2026_08_19_000006_create_issuer_secret_histories_table.php`, `app/Models/IssuerSecret.php` (replace placeholder), `app/Models/IssuerSecretHistory.php`, `app/Services/Certificates/CertificateInfo.php`, `app/Services/Certificates/CertificateParser.php`, `app/Services/Certificates/InvalidCertificate.php`, `app/Data/Requests/PutIssuerCredentialsData.php`, `app/Data/Requests/PutIssuerCertificateData.php`, `app/Http/Controllers/Api/V1/IssuerCredentialsController.php`, `app/Http/Controllers/Api/V1/IssuerCertificateController.php`, `tests/Fixtures/certs/test-cert.pem`, `tests/Fixtures/certs/test-key.pem`, `tests/Fixtures/certs/test.p12`, `tests/Fixtures/certs/other-key.pem`, `tests/Unit/Certificates/CertificateParserTest.php`, `tests/Feature/IssuerSecretsTest.php`
 - Modify: `routes/api.php`
 
 **Interfaces:**
@@ -2897,61 +3028,45 @@ class CertificateParser
 }
 ```
 
-- [ ] **Step 7: Requests and controllers**
+- [ ] **Step 7: DTOs and controllers**
 
-`app/Http/Requests/PutIssuerCredentialsRequest.php`
+`app/Data/Requests/PutIssuerCredentialsData.php`
 ```php
 <?php
 
-namespace App\Http\Requests;
+namespace App\Data\Requests;
 
-use Illuminate\Foundation\Http\FormRequest;
+use Spatie\LaravelData\Attributes\Validation\Max;
+use Spatie\LaravelData\Data;
 
-class PutIssuerCredentialsRequest extends FormRequest
+class PutIssuerCredentialsData extends Data
 {
-    public function authorize(): bool
-    {
-        return true;
-    }
-
-    /** @return array<string, mixed> */
-    public function rules(): array
-    {
-        return [
-            'client_id' => ['required', 'string', 'max:255'],
-            'client_secret' => ['required', 'string', 'max:1024'],
-        ];
-    }
+    public function __construct(
+        #[Max(255)] public string $client_id,
+        #[Max(1024)] public string $client_secret,
+    ) {}
 }
 ```
 
-`app/Http/Requests/PutIssuerCertificateRequest.php`
+`app/Data/Requests/PutIssuerCertificateData.php`
 ```php
 <?php
 
-namespace App\Http\Requests;
+namespace App\Data\Requests;
 
-use Illuminate\Foundation\Http\FormRequest;
-use Illuminate\Validation\Rule;
+use Spatie\LaravelData\Attributes\Validation\In;
+use Spatie\LaravelData\Attributes\Validation\RequiredIf;
+use Spatie\LaravelData\Data;
 
-class PutIssuerCertificateRequest extends FormRequest
+class PutIssuerCertificateData extends Data
 {
-    public function authorize(): bool
-    {
-        return true;
-    }
-
-    /** @return array<string, mixed> */
-    public function rules(): array
-    {
-        return [
-            'format' => ['required', Rule::in(['pem', 'pkcs12'])],
-            'certificate' => ['required_if:format,pem', 'string'],
-            'private_key' => ['required_if:format,pem', 'string'],
-            'passphrase' => ['nullable', 'string', 'required_if:format,pkcs12'],
-            'pkcs12' => ['required_if:format,pkcs12', 'string'],
-        ];
-    }
+    public function __construct(
+        #[In(['pem', 'pkcs12'])] public string $format,
+        #[RequiredIf('format', 'pem')] public ?string $certificate = null,
+        #[RequiredIf('format', 'pem')] public ?string $private_key = null,
+        #[RequiredIf('format', 'pkcs12')] public ?string $pkcs12 = null,
+        #[RequiredIf('format', 'pkcs12')] public ?string $passphrase = null,
+    ) {}
 }
 ```
 
@@ -2961,29 +3076,29 @@ class PutIssuerCertificateRequest extends FormRequest
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Data\Requests\PutIssuerCredentialsData;
+use App\Data\Resources\IssuerData;
 use App\Enums\LhdnMode;
 use App\Exceptions\ProblemException;
 use App\Http\Controllers\Controller;
-use App\Http\Requests\PutIssuerCredentialsRequest;
-use App\Http\Resources\IssuerResource;
 use App\Models\Issuer;
 
 class IssuerCredentialsController extends Controller
 {
-    public function update(PutIssuerCredentialsRequest $request, Issuer $issuer): IssuerResource
+    public function update(PutIssuerCredentialsData $data, Issuer $issuer): IssuerData
     {
         if ($issuer->lhdn_mode !== LhdnMode::OwnCredentials) {
             throw ProblemException::conflict('Credentials only apply to issuers in own_credentials mode.', 'credentials_not_applicable');
         }
         $secret = $issuer->secret()->firstOrNew([]);
         $secret->fill([
-            'lhdn_client_id' => $request->string('client_id')->toString(),
-            'lhdn_client_secret' => $request->string('client_secret')->toString(),
+            'lhdn_client_id' => $data->client_id,
+            'lhdn_client_secret' => $data->client_secret,
             'credentials_verified_at' => null,
         ]);
         $secret->save();
 
-        return new IssuerResource($issuer->fresh('secret'));
+        return IssuerData::fromModel($issuer->fresh('secret'))->wrap('data');
     }
 }
 ```
@@ -2994,10 +3109,10 @@ class IssuerCredentialsController extends Controller
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Data\Requests\PutIssuerCertificateData;
+use App\Data\Resources\IssuerData;
 use App\Exceptions\ProblemException;
 use App\Http\Controllers\Controller;
-use App\Http\Requests\PutIssuerCertificateRequest;
-use App\Http\Resources\IssuerResource;
 use App\Models\Issuer;
 use App\Models\IssuerSecretHistory;
 use App\Services\Certificates\CertificateParser;
@@ -3008,15 +3123,15 @@ use Illuminate\Support\Facades\DB;
 class IssuerCertificateController extends Controller
 {
     public function update(
-        PutIssuerCertificateRequest $request,
+        PutIssuerCertificateData $data,
         Issuer $issuer,
         CertificateParser $parser,
         IssuerActivator $activator,
-    ): IssuerResource {
+    ): IssuerData {
         try {
-            $info = $request->string('format')->toString() === 'pem'
-                ? $parser->fromPem($request->string('certificate')->toString(), $request->string('private_key')->toString(), $request->input('passphrase'))
-                : $parser->fromPkcs12((string) base64_decode($request->string('pkcs12')->toString(), true), (string) $request->input('passphrase'));
+            $info = $data->format === 'pem'
+                ? $parser->fromPem((string) $data->certificate, (string) $data->private_key, $data->passphrase)
+                : $parser->fromPkcs12((string) base64_decode((string) $data->pkcs12, true), (string) $data->passphrase);
         } catch (InvalidCertificate $e) {
             throw new ProblemException(422, 'Unprocessable Entity', 'The certificate could not be accepted.', $e->getMessage());
         }
@@ -3046,10 +3161,11 @@ class IssuerCertificateController extends Controller
 
         $activator->apply($issuer);
 
-        return new IssuerResource($issuer->fresh('secret'));
+        return IssuerData::fromModel($issuer->fresh('secret'))->wrap('data');
     }
 }
 ```
+(Both `PUT` endpoints return `200` — spatie only auto-selects `201` for `POST`.)
 
 Routes — inside `ability:issuers:manage` group:
 ```php
@@ -3071,7 +3187,7 @@ git add -A && git commit -m "feat(issuers): encrypted LHDN credentials and signi
 ### Task 8: Buyers registry
 
 **Files:**
-- Create: `app/Models/Buyer.php`, `database/migrations/2026_08_19_000007_create_buyers_table.php`, `database/factories/BuyerFactory.php`, `app/Http/Requests/StoreBuyerRequest.php`, `app/Http/Requests/UpdateBuyerRequest.php`, `app/Http/Resources/BuyerResource.php`, `app/Http/Controllers/Api/V1/BuyerController.php`, `tests/Feature/BuyersTest.php`
+- Create: `app/Models/Buyer.php`, `database/migrations/2026_08_19_000007_create_buyers_table.php`, `database/factories/BuyerFactory.php`, `app/Data/Requests/CreateBuyerData.php`, `app/Data/Requests/UpdateBuyerData.php`, `app/Data/Resources/BuyerData.php`, `app/Http/Controllers/Api/V1/BuyerController.php`, `tests/Feature/BuyersTest.php`
 - Modify: `routes/api.php`
 
 **Interfaces:**
@@ -3233,89 +3349,134 @@ class BuyerFactory extends Factory
 }
 ```
 
-- [ ] **Step 4: Requests, resource, controller, routes**
+- [ ] **Step 4: DTOs, controller, routes**
 
-`app/Http/Requests/StoreBuyerRequest.php`
+`app/Data/Requests/CreateBuyerData.php`
 ```php
 <?php
 
-namespace App\Http\Requests;
+namespace App\Data\Requests;
 
 use App\Enums\IdType;
-use Illuminate\Foundation\Http\FormRequest;
-use Illuminate\Validation\Rule;
+use Spatie\LaravelData\Attributes\Validation\Email;
+use Spatie\LaravelData\Attributes\Validation\Max;
+use Spatie\LaravelData\Attributes\Validation\RequiredWith;
+use Spatie\LaravelData\Attributes\Validation\Size;
+use Spatie\LaravelData\Data;
 
-class StoreBuyerRequest extends FormRequest
+class CreateBuyerData extends Data
 {
-    public function authorize(): bool
-    {
-        return true;
-    }
-
-    /** @return array<string, mixed> */
-    public function rules(): array
-    {
-        return [
-            'name' => ['required', 'string', 'max:300'],
-            'tin' => ['nullable', 'string', 'max:20'],
-            'id_type' => ['nullable', 'required_with:id_number', Rule::enum(IdType::class)],
-            'id_number' => ['nullable', 'required_with:id_type', 'string', 'max:30'],
-            'sst_number' => ['nullable', 'string', 'max:40'],
-            'email' => ['nullable', 'email', 'max:320'],
-            'phone' => ['nullable', 'string', 'max:20'],
-            'address_line1' => ['nullable', 'string', 'max:150'],
-            'address_line2' => ['nullable', 'string', 'max:150'],
-            'address_line3' => ['nullable', 'string', 'max:150'],
-            'postcode' => ['nullable', 'string', 'max:10'],
-            'city' => ['nullable', 'string', 'max:50'],
-            'state_code' => ['nullable', 'string', 'size:2'],
-            'country_code' => ['sometimes', 'string', 'size:3'],
-            'general_public' => ['sometimes', 'boolean'],
-        ];
-    }
+    public function __construct(
+        #[Max(300)] public string $name,
+        #[Max(20)] public ?string $tin = null,
+        #[RequiredWith('id_number')] public ?IdType $id_type = null,
+        #[RequiredWith('id_type'), Max(30)] public ?string $id_number = null,
+        #[Max(40)] public ?string $sst_number = null,
+        #[Email, Max(320)] public ?string $email = null,
+        #[Max(20)] public ?string $phone = null,
+        #[Max(150)] public ?string $address_line1 = null,
+        #[Max(150)] public ?string $address_line2 = null,
+        #[Max(150)] public ?string $address_line3 = null,
+        #[Max(10)] public ?string $postcode = null,
+        #[Max(50)] public ?string $city = null,
+        #[Size(2)] public ?string $state_code = null,
+        #[Size(3)] public string $country_code = 'MYS',
+        public bool $general_public = false,
+    ) {}
 }
 ```
 
-`app/Http/Requests/UpdateBuyerRequest.php` — same as `StoreBuyerRequest` but `'name' => ['sometimes', 'string', 'max:300']` (copy the file, change the class name and that one rule).
-
-`app/Http/Resources/BuyerResource.php`
+`app/Data/Requests/UpdateBuyerData.php` — same fields, all `Optional` (nullable ones as `type|Optional|null`):
 ```php
 <?php
 
-namespace App\Http\Resources;
+namespace App\Data\Requests;
 
-use Illuminate\Http\Request;
-use Illuminate\Http\Resources\Json\JsonResource;
+use App\Enums\IdType;
+use Spatie\LaravelData\Attributes\Validation\Email;
+use Spatie\LaravelData\Attributes\Validation\Max;
+use Spatie\LaravelData\Attributes\Validation\RequiredWith;
+use Spatie\LaravelData\Attributes\Validation\Size;
+use Spatie\LaravelData\Data;
+use Spatie\LaravelData\Optional;
 
-/** @mixin \App\Models\Buyer */
-class BuyerResource extends JsonResource
+class UpdateBuyerData extends Data
 {
-    public function toArray(Request $request): array
+    public function __construct(
+        #[Max(300)] public string|Optional $name,
+        #[Max(20)] public string|Optional|null $tin,
+        #[RequiredWith('id_number')] public IdType|Optional|null $id_type,
+        #[RequiredWith('id_type'), Max(30)] public string|Optional|null $id_number,
+        #[Max(40)] public string|Optional|null $sst_number,
+        #[Email, Max(320)] public string|Optional|null $email,
+        #[Max(20)] public string|Optional|null $phone,
+        #[Max(150)] public string|Optional|null $address_line1,
+        #[Max(150)] public string|Optional|null $address_line2,
+        #[Max(150)] public string|Optional|null $address_line3,
+        #[Max(10)] public string|Optional|null $postcode,
+        #[Max(50)] public string|Optional|null $city,
+        #[Size(2)] public string|Optional|null $state_code,
+        #[Size(3)] public string|Optional $country_code,
+        public bool|Optional $general_public,
+    ) {}
+}
+```
+
+`app/Data/Resources/BuyerData.php`
+```php
+<?php
+
+namespace App\Data\Resources;
+
+use App\Models\Buyer;
+use Spatie\LaravelData\Data;
+
+class BuyerData extends Data
+{
+    /** @param array<string, mixed>|null $tin_validation_result */
+    public function __construct(
+        public string $id,
+        public string $name,
+        public ?string $tin,
+        public ?string $id_type,
+        public ?string $id_number,
+        public ?string $sst_number,
+        public ?string $email,
+        public ?string $phone,
+        public AddressData $address,
+        public bool $general_public,
+        public ?string $tin_validated_at,
+        public ?array $tin_validation_result,
+        public ?string $created_at,
+        public ?string $updated_at,
+    ) {}
+
+    public static function fromModel(Buyer $buyer): self
     {
-        return [
-            'id' => $this->id,
-            'name' => $this->name,
-            'tin' => $this->tin,
-            'id_type' => $this->id_type?->value,
-            'id_number' => $this->id_number,
-            'sst_number' => $this->sst_number,
-            'email' => $this->email,
-            'phone' => $this->phone,
-            'address' => [
-                'line1' => $this->address_line1,
-                'line2' => $this->address_line2,
-                'line3' => $this->address_line3,
-                'postcode' => $this->postcode,
-                'city' => $this->city,
-                'state_code' => $this->state_code,
-                'country_code' => $this->country_code,
-            ],
-            'general_public' => $this->general_public,
-            'tin_validated_at' => $this->tin_validated_at?->toIso8601String(),
-            'tin_validation_result' => $this->tin_validation_result,
-            'created_at' => $this->created_at?->toIso8601String(),
-            'updated_at' => $this->updated_at?->toIso8601String(),
-        ];
+        return new self(
+            id: $buyer->id,
+            name: $buyer->name,
+            tin: $buyer->tin,
+            id_type: $buyer->id_type?->value,
+            id_number: $buyer->id_number,
+            sst_number: $buyer->sst_number,
+            email: $buyer->email,
+            phone: $buyer->phone,
+            address: new AddressData(
+                line1: $buyer->address_line1,
+                line2: $buyer->address_line2,
+                line3: $buyer->address_line3,
+                postcode: $buyer->postcode,
+                city: $buyer->city,
+                state_code: $buyer->state_code,
+                country_code: $buyer->country_code,
+            ),
+            general_public: $buyer->general_public,
+            tin_validated_at: $buyer->tin_validated_at?->toIso8601String(),
+            tin_validation_result: $buyer->tin_validation_result,
+            created_at: $buyer->created_at?->toIso8601String(),
+            updated_at: $buyer->updated_at?->toIso8601String(),
+        );
     }
 }
 ```
@@ -3326,41 +3487,42 @@ class BuyerResource extends JsonResource
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Data\Requests\CreateBuyerData;
+use App\Data\Requests\UpdateBuyerData;
+use App\Data\Resources\BuyerData;
 use App\Http\Controllers\Controller;
-use App\Http\Requests\StoreBuyerRequest;
-use App\Http\Requests\UpdateBuyerRequest;
-use App\Http\Resources\BuyerResource;
 use App\Models\Buyer;
 use Illuminate\Http\Request;
-use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
+use Spatie\LaravelData\CursorPaginatedDataCollection;
 
 class BuyerController extends Controller
 {
-    public function index(Request $request): AnonymousResourceCollection
+    /** @return CursorPaginatedDataCollection<int, BuyerData> */
+    public function index(Request $request): CursorPaginatedDataCollection
     {
         $query = Buyer::query()->latest();
         if ($tin = $request->query('tin')) {
             $query->where('tin', $tin);
         }
 
-        return BuyerResource::collection($query->cursorPaginate(50));
+        return BuyerData::collect($query->cursorPaginate(50), CursorPaginatedDataCollection::class);
     }
 
-    public function store(StoreBuyerRequest $request): BuyerResource
+    public function store(CreateBuyerData $data): BuyerData
     {
-        return new BuyerResource(Buyer::create($request->validated()));
+        return BuyerData::fromModel(Buyer::create($data->toArray()))->wrap('data');
     }
 
-    public function show(Buyer $buyer): BuyerResource
+    public function show(Buyer $buyer): BuyerData
     {
-        return new BuyerResource($buyer);
+        return BuyerData::fromModel($buyer)->wrap('data');
     }
 
-    public function update(UpdateBuyerRequest $request, Buyer $buyer): BuyerResource
+    public function update(UpdateBuyerData $data, Buyer $buyer): BuyerData
     {
-        $buyer->update($request->validated());
+        $buyer->update($data->toArray());
 
-        return new BuyerResource($buyer->fresh());
+        return BuyerData::fromModel($buyer->fresh())->wrap('data');
     }
 }
 ```
@@ -3391,7 +3553,7 @@ git add -A && git commit -m "feat(buyers): tenant buyer registry API"
 ### Task 9: Reference data (codes table, importer, API)
 
 **Files:**
-- Create: `app/Models/ReferenceCode.php`, `database/migrations/2026_08_19_000008_create_reference_codes_table.php`, `database/reference/{document_types,tax_types,state_codes,payment_modes,classification_codes,unit_types,currencies,country_codes,msic_codes}.json`, `app/Console/Commands/RefreshReferenceData.php`, `database/seeders/ReferenceDataSeeder.php`, `app/Http/Controllers/Api/V1/ReferenceController.php`, `tests/Feature/ReferenceDataTest.php`
+- Create: `app/Models/ReferenceCode.php`, `database/migrations/2026_08_19_000008_create_reference_codes_table.php`, `database/reference/{document_types,tax_types,state_codes,payment_modes,classification_codes,unit_types,currencies,country_codes,msic_codes}.json`, `app/Console/Commands/RefreshReferenceData.php`, `database/seeders/ReferenceDataSeeder.php`, `app/Data/Resources/ReferenceCodeData.php`, `app/Http/Controllers/Api/V1/ReferenceController.php`, `tests/Feature/ReferenceDataTest.php`
 - Modify: `routes/api.php`, `database/seeders/DatabaseSeeder.php`, spec §7.1 (one table instead of nine — see Step 7)
 
 **Interfaces:**
@@ -3662,7 +3824,32 @@ class ReferenceDataSeeder extends Seeder
 ```
 In `DatabaseSeeder::run()` replace the body with `$this->call(ReferenceDataSeeder::class);`.
 
-- [ ] **Step 6: Controller and route**
+- [ ] **Step 6: DTO, controller and route**
+
+`app/Data/Resources/ReferenceCodeData.php`
+```php
+<?php
+
+namespace App\Data\Resources;
+
+use App\Models\ReferenceCode;
+use Spatie\LaravelData\Data;
+
+class ReferenceCodeData extends Data
+{
+    /** @param array<string, mixed>|null $extra */
+    public function __construct(
+        public string $code,
+        public string $description,
+        public ?array $extra,
+    ) {}
+
+    public static function fromModel(ReferenceCode $code): self
+    {
+        return new self($code->code, $code->description, $code->extra);
+    }
+}
+```
 
 `app/Http/Controllers/Api/V1/ReferenceController.php`
 ```php
@@ -3670,6 +3857,7 @@ In `DatabaseSeeder::run()` replace the body with `$this->call(ReferenceDataSeede
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Data\Resources\ReferenceCodeData;
 use App\Exceptions\ProblemException;
 use App\Http\Controllers\Controller;
 use App\Models\ReferenceCode;
@@ -3691,7 +3879,7 @@ class ReferenceController extends Controller
             $rows = ReferenceCode::where('set', $set)->orderBy('code')->get(['code', 'description', 'extra', 'version']);
 
             return [
-                'items' => $rows->map(fn (ReferenceCode $r) => ['code' => $r->code, 'description' => $r->description, 'extra' => $r->extra])->all(),
+                'items' => ReferenceCodeData::collect($rows)->toArray(),
                 'version' => (string) ($rows->first()?->version ?? ''),
             ];
         });

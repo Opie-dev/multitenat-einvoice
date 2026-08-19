@@ -37,7 +37,7 @@ Layers inside the engine:
 
 | Layer | Responsibility |
 |---|---|
-| HTTP / API (`app/Http`) | Auth, tenant resolution, validation, RFC 7807 errors, versioned `/v1` |
+| HTTP / API (`app/Http`, `app/Data`) | Auth, tenant resolution, request/response DTOs (spatie/laravel-data — no FormRequest/JsonResource), RFC 7807 errors, versioned `/v1` |
 | Application (`app/Actions`, `app/Services`) | Use-cases: create document, submit, cancel, verify TIN, onboard issuer |
 | Domain (`app/Domain`) | Document DTOs, state machine, UBL builder, signer, consolidation rules |
 | Infrastructure (`app/Lhdn`, `app/Webhooks`, `app/Tenancy`) | LHDN clients, token cache, batcher, poller, webhook delivery, tenancy scope |
@@ -234,6 +234,8 @@ Laravel 12 · PHP 8.3 · MySQL 8 · Redis · Horizon · Pest · spatie/laravel-d
 | Marketplace seller | configurable per Catalog store; engine agnostic | user decision; engine only needs `issuer_id` per document |
 | Secrets | encrypted DB columns | user decision; no extra infra in v1 |
 | v1 scope | API only | user decision; SDK + portal later |
+| API DTOs | spatie/laravel-data for all request validation + response serialisation | user decision (2026-08-19); one typed contract per endpoint, reusable by the SDK later |
+| Dashboard front end | Inertia.js + React served by the engine | user decision (2026-08-19) |
 
 ## 13. Follow-up projects (out of scope here)
 1. `billplz/einvoice-sdk` PHP package (thin client + Laravel service provider).
