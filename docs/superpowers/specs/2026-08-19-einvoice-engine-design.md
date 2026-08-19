@@ -142,14 +142,12 @@ Scheduled job (daily, acts on the previous month for issuers with `consolidation
 ## 6. LHDN gateway
 
 ### 6.1 Clients
-`LhdnClient` interface: `token(Issuer): AccessToken`, `submitDocuments(Issuer, SubmissionBatch): SubmissionResult`, `getSubmission(...)`, `getDocument(...)`, `cancelDocument(...)`, `validateTin(...)`, `searchTin(...)`.
-- `IntermediaryLhdnClient`: Billplz client credentials from config; token requested with `onbehalfof: <issuer TIN>`.
-- `OwnCredentialsLhdnClient`: issuer's encrypted credentials.
-- `FakeLhdnClient`: deterministic responses for tests, driven by fixture files.
+`LhdnClient` interface: `token(Issuer): AccessToken`, `submitDocuments(Issuer, SubmissionBatch): SubmissionResult`, `getSubmission(...)`, `getDocument(...)`, `cancelDocument(...)`, `validateTin(...)`.
+Implementations (amended 2026-08-20, Plan 3): `HttpLhdnClient` — one HTTP implementation that serves both modes (intermediary credentials from config with `onbehalfof: <issuer TIN>`, or the issuer's own encrypted credentials) as chosen by `CredentialsResolver`; and `FakeLhdnClient` — deterministic in-memory responses for tests, scripted per operation rather than from fixture files. `searchTin` is deferred (no caller yet).
 Resolution: `LhdnClientFactory::for(Issuer)` by `lhdn_mode` and `environment` (base URLs per environment in config).
 
 ### 6.2 Token cache
-Redis key `lhdn:token:{env}:{mode}:{issuer_id}` with TTL = expires_in - 60s. Single-flight lock to avoid stampedes.
+Redis key `lhdn:token:{env}:{mode}:{sha1(client_id|onbehalfof)}` (amended 2026-08-20, Plan 3: keyed by the credential set actually used, so two issuers sharing one intermediary credential share one token and the raw client id never lands in a cache key) with TTL = expires_in - 60s. Single-flight lock to avoid stampedes.
 
 ### 6.3 Submission pipeline
 Per document (queued job `PrepareDocument`): `BuildUbl` (UBL 2.1 JSON per LHDN SDK schema, version 1.1 signed) -> `HashDocument` (SHA-256 of canonical JSON) -> `SignDocument` (XAdES-style signature per LHDN signing spec using issuer cert; implemented in `Signer` with phpseclib/OpenSSL) -> status `queued`.

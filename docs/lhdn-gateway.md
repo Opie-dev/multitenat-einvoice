@@ -43,6 +43,17 @@ activation; `lhdn_credentials_invalid` and `lhdn_unavailable` need a manual
 `submitted` state is ever reached). `held -> held` covers moving an
 already-held document to a different hold reason.
 
+**The two post-`valid` edges in the diagram above are not proactively
+detected yet.** `valid -> rejected` (the buyer rejects within 72h) and a
+cancellation performed directly in the MyInvois portal are only noticed if a
+`PollSubmission` for that submission happens to run again *after* LHDN changed
+the status — which normally never happens, because polling stops as soon as
+every document in the submission is final. The engine therefore keeps showing
+such a document as `valid`. A dedicated status-refresh job that re-reads
+`valid` documents inside their 72h window is Plan 4 (spec §6.5); until then
+the transitions exist in the state machine and in `PollSubmission::apply()`,
+but nothing drives them on a schedule.
+
 ## 2. Components
 
 | Piece | File | Role |
@@ -60,7 +71,7 @@ already-held document to a different hold reason.
 | `DocumentSigner` | `app/Lhdn/Signing/*` | Signs the UBL JSON with the issuer's certificate. |
 | `PrepareDocument` | `app/Jobs/PrepareDocument.php` | `queued` -> build UBL -> sign -> store `ubl_json`/`signed_payload_hash`/`lhdn_internal_id` -> dispatch `SubmitDocuments`. Holds the document instead if the issuer isn't active, has no valid certificate, or the LHDN payload size limit is exceeded (`Invalid` for the size case). |
 | `SubmitDocuments` | `app/Jobs/SubmitDocuments.php` | Batches one issuer's prepared, due (`next_submission_at`) documents (oldest first, up to `submission.max_documents` / `submission.max_bytes`) into one `submitDocuments` call; settles accepted documents to `submitted` and dispatches `PollSubmission`; settles rejected ones to `invalid`; on a client exception, applies retry/backoff or holds per §4 below. |
-| `PollSubmission` | `app/Jobs/PollSubmission.php` | Polls `getSubmission` for one `submissionUid`; settles each document to `valid`/`invalid`; reschedules itself along `poll.backoff_seconds` until the submission is final; also reacts to a previously-`valid` document later reported `rejected`/`cancelled` by LHDN. |
+| `PollSubmission` | `app/Jobs/PollSubmission.php` | Polls `getSubmission` for one `submissionUid`; settles each document to `valid`/`invalid`; reschedules itself along `poll.backoff_seconds` until the submission is final. A failed *read* never settles a document (see §4); at the end of the curve it falls back to a per-document `getDocument` check. It can also settle a previously-`valid` document reported `rejected`/`cancelled`, but only if a poll happens to run at that moment — see the note in §1. |
 | `ReleaseHeldDocuments` | `app/Jobs/ReleaseHeldDocuments.php` | Re-queues documents held for a releasable reason once the issuer activates. |
 | `einvoice:lhdn-dispatch` | `app/Console/Commands/LhdnDispatch.php` | Safety-net sweep (see §3). |
 
@@ -94,10 +105,39 @@ Every LHDN client call raises `App\Lhdn\LhdnException` with a `LhdnErrorKind`:
 - `auth` (401/403) — the issuer's credentials are wrong; documents move to
   `held` with reason `lhdn_credentials_invalid` and the cached token for that
   credential set is dropped so the next attempt re-authenticates.
-- `terminal` (any other non-2xx, e.g. 400 validation) — documents move to
-  `invalid` with `lhdn_errors` populated from the response.
+- `terminal` (any other non-2xx, e.g. 400 validation) — what this means depends
+  on which call failed:
+  - `submitDocuments` with **400 or 422**: LHDN rejected the payload we sent, so
+    every document in the batch moves to `invalid` with `lhdn_errors` populated
+    from the response. Any *other* terminal status from `submitDocuments` (404,
+    405, 408, 409, …) is about the request plumbing rather than the invoices, so
+    it takes the transient retry/backoff path instead.
+  - `getSubmission`: never a verdict on the documents. A failed poll — terminal,
+    transient or `breaker` alike — only reschedules the poll along
+    `poll.backoff_seconds`. When that curve is exhausted, `PollSubmission` asks
+    LHDN about each still-`submitted` document individually via `getDocument`
+    and settles it from that answer (`Valid` -> `valid` + `longId`, `Invalid` ->
+    `invalid` + validation errors). If the per-document read also fails the
+    document simply stays `submitted` and the `einvoice:lhdn-dispatch` sweep
+    re-polls it later. Nothing ever fabricates an `LHDN_4xx` error onto a
+    document from a submission-level read failure.
 - `breaker` — the circuit breaker for that environment is open; thrown by
   `CircuitBreaker::guard()` before any request is sent.
+
+Only failures that actually reached LHDN move the breaker, and only
+platform-level ones: connection errors and 5xx responses. An HTTP 429 *from*
+MyInvois is a per-taxpayer rate limit, not an outage, so it never opens the
+breaker for the whole environment; neither does our own `LhdnRateLimiter`
+rejection or an already-open breaker, which are refused before any request is
+sent and therefore write no `submission_attempts` row either (this holds for
+the token path as well as for API calls).
+
+A document that can never be *prepared* (a builder/signing bug rather than an
+LHDN response) is counted in `submission_attempts_count` with a
+`last_submission_error` of kind `prepare`, and the job rethrows so the queue
+retries it; once `submission.max_attempts` is reached it is held with
+`lhdn_unavailable` and reason `prepare_failed`. It is never marked `invalid` —
+the merchant's data was fine.
 
 Every attempt — successful or not, including the token fetch — is recorded to
 `submission_attempts` (`App\Models\SubmissionAttempt`) by `AttemptRecorder`:
@@ -225,5 +265,6 @@ fixtures, or tests.
   being hardcoded in the jobs, so they can be tuned per environment/deployment
   without a code change.
 
-**Not yet built (Plan 4):** certificate expiry monitor / automatic
-suspension, webhooks, consolidation, PDF.
+**Not yet built (Plan 4):** status-refresh job for `valid` documents (buyer
+rejection / portal-side cancellation, see §1), certificate expiry monitor /
+automatic suspension, webhooks, consolidation, PDF.

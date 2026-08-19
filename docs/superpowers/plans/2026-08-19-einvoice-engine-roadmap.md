@@ -41,3 +41,30 @@ Branch `plan-2-documents-core`: 10 tasks + final fix wave; 183 Pest tests / 558 
 - `CreateDocument` resolves the issuer before the natural-key replay (replay 404s if issuer removed).
 - Tests: top-level non-MYR `exchange_rate` enforcement; mixed-currency batch.
 - Plan doc `2026-08-19-plan-2-documents-core.md` still shows the pre-amendment natural key (historical).
+
+## Plan 3 outcome (2026-08-20)
+
+Branch `plan-3-lhdn-gateway`: 9 tasks + final fix wave; 246 Pest tests / 900 assertions (+3 opt-in sandbox tests skipped), PHPStan level 8, Pint clean, `failOnDeprecation` on, `LHDN_DRIVER=fake` in tests.
+
+Shipped: `LhdnClient` interface with `HttpLhdnClient` (intermediary **and** own-credentials via `CredentialsResolver`) + `FakeLhdnClient`; Redis token cache with single-flight (`TokenProvider`); UBL 2.1 builder with golden-file tests and the XAdES-style `DocumentSigner`; the `PrepareDocument` → `SubmitDocuments` → `PollSubmission` pipeline (batching by count and wire bytes, retry/backoff curves in config, `held` reasons for everything the issuer must fix); per-issuer/per-operation rate limiter and per-environment circuit breaker; `submission_attempts` audit trail for every request/response; issuer `verify-tin` / `authorize` onboarding endpoints; document `submit` (resubmit) and `cancel` (72h window); the `einvoice:lhdn-dispatch` safety-net sweep; `docs/lhdn-gateway.md`; opt-in real-sandbox integration tests.
+
+Spec amended: §6.1 (single `HttpLhdnClient` for both modes, `searchTin` deferred), §6.2 (token cache key is `lhdn:token:{env}:{mode}:{sha1(client_id|onbehalfof)}`), §7.4 (certificate-expiry suspension is lazy today; the monitor is Plan 4).
+
+Final-fix-wave rulings worth remembering: a failed `getSubmission` read is never a verdict on the documents (reschedule, then per-document `getDocument` at the end of the curve); `SubmitDocuments` only fails a whole batch on HTTP 400/422; the circuit breaker counts only connection errors and 5xx (an LHDN 429 is a per-taxpayer limit); limiter/breaker rejections write no `submission_attempts` row in either the token path or the API path.
+
+### Backlog carried into Plan 4+
+- **Status-refresh job for `valid` documents** — buyer rejection (`valid -> rejected`) and portal-side cancellation are currently only seen if a poll happens to run after LHDN changed the status, which normally never happens (spec §6.5 partially implemented). This is the first Plan 4 task.
+- **Webhooks on `DocumentTransitioned`** — after the refresh path exists, so subscribers see post-`valid` changes too (spec §7.2).
+- **Duplicate `codeNumber` on resubmit after a crash** — a document submitted but not recorded will be rejected as a duplicate on resubmit; map that rejection to a `getDocument` lookup and adopt the existing UUID instead of marking it `invalid`.
+- **Certificate expiry monitor + automatic suspension/release** (spec §7.4).
+- `submission_attempts` retention/pruning (7-year LHDN requirement vs. table growth); the `created_at` index added in Plan 3 exists for that sweep.
+- `pdf_path` column has no producer or consumer yet (spec §7.3).
+- Consolidation (`awaiting_consolidation -> consolidated`, spec §5.6).
+- UBL: `TaxSubtotal` should group by exemption reason; buyer `TTX` (tourism tax) identifier is not emitted; supplier contact `NA` defaults now exist but the issuer schema still requires phone/email.
+- `validateTin`: LHDN can answer 400 (malformed TIN) as well as 404; both should surface as `{valid: false}` rather than a terminal exception.
+- Honour `Retry-After` from LHDN 429/503 responses instead of the fixed backoff curve.
+- `TokenProvider` lock TTL (10s) is unrelated to the HTTP timeout (30s) and `LockTimeoutException` is not mapped to an `LhdnException`.
+- `CircuitBreaker` uses a non-atomic `Cache::increment` + `put` for the first failure (a lost race can extend the counter window; harmless but worth a note or a Lua script on Redis).
+- `ValidateTin` caches before resolving the issuer, so the cache key does not distinguish the resolved environment in every path.
+- `LhdnDriverGuard` covers `LHDN_DRIVER=fake` in production; consider the same guard for missing intermediary credentials.
+- Spec §6.1/§6.2 wording drift was corrected in Plan 3; check §6.3–§6.5 against the built pipeline when Plan 4 starts.
