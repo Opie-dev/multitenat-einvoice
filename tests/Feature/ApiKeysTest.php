@@ -96,3 +96,43 @@ it('requires X-Tenant-Id for a service token before route binding is attempted',
         ->assertStatus(400)
         ->assertJsonPath('code', 'tenant_header_required');
 });
+
+it('forbids an api key from creating a key for another environment', function () {
+    $tenant = Tenant::factory()->create();
+    $this->withHeaders(apiKeyHeaders($tenant))
+        ->postJson('/v1/api-keys', ['name' => 'prod', 'environment' => 'production', 'abilities' => ['read']])
+        ->assertStatus(403)
+        ->assertJsonPath('code', 'forbidden');
+    expect(ApiKey::withoutGlobalScopes()->where('environment', Environment::Production)->count())->toBe(0);
+});
+
+it('lists only its own environment for an api key', function () {
+    $tenant = Tenant::factory()->create();
+    $headers = apiKeyHeaders($tenant); // sandbox key
+    ['key' => $prod] = ApiKey::generate($tenant, 'prod', Environment::Production, ['read']);
+    ['key' => $sandbox] = ApiKey::generate($tenant, 'sandbox', Environment::Sandbox, ['read']);
+
+    $ids = collect($this->withHeaders($headers)->getJson('/v1/api-keys')->assertOk()->json('data'))->pluck('id')->all();
+    expect($ids)->toContain($sandbox->id)->not->toContain($prod->id);
+
+    // A service token still sees every environment for the tenant.
+    $all = collect($this->withHeaders(serviceHeaders($tenant))->getJson('/v1/api-keys')->assertOk()->json('data'))->pluck('id')->all();
+    expect($all)->toContain($prod->id)->toContain($sandbox->id);
+});
+
+it('returns 404 when an api key revokes a key from another environment', function () {
+    $tenant = Tenant::factory()->create();
+    $headers = apiKeyHeaders($tenant); // sandbox key
+    ['key' => $prod] = ApiKey::generate($tenant, 'prod', Environment::Production, ['read']);
+
+    $this->withHeaders($headers)->deleteJson("/v1/api-keys/{$prod->id}")->assertStatus(404);
+    expect($prod->refresh()->revoked_at)->toBeNull();
+});
+
+it('lets a service token create a key for either environment regardless of X-Environment', function () {
+    $tenant = Tenant::factory()->create();
+    $this->withHeaders(serviceHeaders($tenant, 'sandbox'))
+        ->postJson('/v1/api-keys', ['name' => 'prod', 'environment' => 'production', 'abilities' => ['read']])
+        ->assertCreated()
+        ->assertJsonPath('data.environment', 'production');
+});

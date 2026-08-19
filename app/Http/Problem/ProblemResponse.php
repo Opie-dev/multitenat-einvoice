@@ -36,7 +36,12 @@ class ProblemResponse
             $body['errors'] = $errors;
         }
 
-        return new JsonResponse($body, $status, ['Content-Type' => 'application/problem+json']);
+        // Preserve protocol headers the exception carries (Retry-After and the
+        // X-RateLimit-* set on throttling, WWW-Authenticate on 401, ...) while
+        // keeping the problem+json content type authoritative.
+        $headers = $e instanceof HttpExceptionInterface ? $e->getHeaders() : [];
+
+        return new JsonResponse($body, $status, $headers + ['Content-Type' => 'application/problem+json']);
     }
 
     /** @return array{0:int,1:string,2:string,3:?string,4:array<int,array<string,string>>} */

@@ -53,4 +53,13 @@ class TenantContext
     {
         return $this->environment;
     }
+
+    /**
+     * Merchant API keys are bound to a single environment; service tokens pick
+     * theirs per request and may therefore act across both.
+     */
+    public function isApiKeyActor(): bool
+    {
+        return $this->actor?->type === 'api_key';
+    }
 }

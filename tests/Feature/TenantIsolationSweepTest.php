@@ -33,6 +33,27 @@ it('returns 404 for cross-tenant access', function (Closure $make, string $metho
         ->assertStatus(404);
 })->with('cross_tenant_routes');
 
+/**
+ * A credential bound to one environment must never reach the other one, even
+ * within its own tenant. Same rule as cross-tenant access: 404, never 403.
+ */
+dataset('cross_environment_routes', function () {
+    return [
+        'issuer show' => [fn (Tenant $t) => Issuer::factory()->for($t)->create(['environment' => Environment::Production]), 'GET', '/v1/issuers/{id}'],
+        'api key revoke' => [fn (Tenant $t) => ApiKey::generate($t, 'k', Environment::Production, ['read'])['key'], 'DELETE', '/v1/api-keys/{id}'],
+    ];
+});
+
+it('returns 404 for cross-environment access by an api key', function (Closure $make, string $method, string $path) {
+    $tenant = Tenant::factory()->create();
+    $resource = $make($tenant);
+    $url = str_replace('{id}', $resource->getKey(), $path);
+
+    $this->withHeaders(apiKeyHeaders($tenant, 'sandbox'))
+        ->json($method, $url)
+        ->assertStatus(404);
+})->with('cross_environment_routes');
+
 it('lists are empty for another tenant', function () {
     $owner = Tenant::factory()->create();
     $intruder = Tenant::factory()->create();

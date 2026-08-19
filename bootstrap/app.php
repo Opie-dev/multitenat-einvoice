@@ -19,6 +19,10 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
+        // spec 3.3: every /v1 request is throttled per credential (see the
+        // 'api' limiter in App\Providers\AppServiceProvider).
+        $middleware->throttleApi();
+
         $middleware->alias([
             'auth.api' => AuthenticateApi::class,
             'tenant' => EnsureTenantContext::class,
