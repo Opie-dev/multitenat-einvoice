@@ -3,6 +3,7 @@
 namespace App\Data\Requests\Documents;
 
 use App\Enums\DocumentType;
+use Illuminate\Validation\Rule;
 use Spatie\LaravelData\Attributes\DataCollectionOf;
 use Spatie\LaravelData\Attributes\Validation\Max;
 use Spatie\LaravelData\Data;
@@ -32,13 +33,26 @@ class CreateDocumentData extends Data
         public ?array $metadata = null,
     ) {}
 
-    /** @return array<string, mixed> */
+    /**
+     * This class is validated both at the top level and nested under
+     * CreateDocumentBatchData.documents.*. A string rule like
+     * `required_unless:currency,MYR` resolves `currency` against the *root*
+     * payload, not this document's own scope, so under a batch it would see
+     * no root-level `currency` and treat exchange_rate as unconditionally
+     * required. Use Rule::requiredIf() with a closure over $context->payload
+     * instead, which is correctly scoped in both cases.
+     *
+     * @return array<string, mixed>
+     */
     public static function rules(ValidationContext $context): array
     {
         return [
             'lines' => ['required', 'array', 'min:1', 'max:500'],
             'currency' => ['string', 'size:3', 'regex:/^[A-Z]{3}$/'],
-            'exchange_rate' => ['nullable', 'numeric', 'gt:0', 'required_unless:currency,MYR'],
+            'exchange_rate' => [
+                'nullable', 'numeric', 'gt:0',
+                Rule::requiredIf(fn () => data_get($context->payload, 'currency', 'MYR') !== 'MYR'),
+            ],
             'issue_date' => ['nullable', 'date_format:Y-m-d'],
             'metadata' => ['nullable', 'array'],
         ];

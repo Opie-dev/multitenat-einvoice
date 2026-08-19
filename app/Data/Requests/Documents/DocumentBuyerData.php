@@ -36,14 +36,15 @@ class DocumentBuyerData extends Data
      * id_type and id_number are co-required. This object is always nested (under
      * `buyer`), so string rules like `required_with:id_number` would resolve their
      * parameter against the *root* payload rather than this object's own scope and
-     * never fire. Compute presence from $context->payload directly instead.
+     * never fire. Compute presence from $context->payload directly instead, via a
+     * lazy Rule::requiredIf() closure.
      *
      * @return array<string, mixed>
      */
     public static function rules(ValidationContext $context): array
     {
-        $hasIdType = filled(data_get($context->payload, 'id_type'));
-        $hasIdNumber = filled(data_get($context->payload, 'id_number'));
+        $hasIdType = fn () => filled(data_get($context->payload, 'id_type'));
+        $hasIdNumber = fn () => filled(data_get($context->payload, 'id_number'));
 
         return [
             'id_type' => ['nullable', new Enum(IdType::class), Rule::requiredIf($hasIdNumber)],

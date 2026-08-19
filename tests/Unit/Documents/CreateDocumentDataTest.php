@@ -1,5 +1,6 @@
 <?php
 
+use App\Data\Requests\Documents\CreateDocumentBatchData;
 use App\Data\Requests\Documents\CreateDocumentData;
 use App\Data\Requests\Documents\DocumentBuyerData;
 use App\Enums\DocumentType;
@@ -114,4 +115,24 @@ it('computes a canonical payload hash independent of key order and the submit fl
     $b = CreateDocumentData::validateAndCreate(array_reverse(validDocumentPayload(['submit' => false]), true));
     $c = CreateDocumentData::validateAndCreate(validDocumentPayload(['lines' => [['quantity' => 3]]]));
     expect($a->payloadHash())->toBe($b->payloadHash())->and($a->payloadHash())->not->toBe($c->payloadHash());
+});
+
+it('does not require exchange_rate for a nested MYR document inside a batch', function () {
+    $batch = CreateDocumentBatchData::validateAndCreate([
+        'documents' => [validDocumentPayload()],
+    ]);
+    expect($batch->documents)->toHaveCount(1)
+        ->and($batch->documents[0]->currency)->toBe('MYR')
+        ->and($batch->documents[0]->exchange_rate)->toBeNull();
+});
+
+it('requires exchange_rate for a nested non-MYR document inside a batch', function () {
+    try {
+        CreateDocumentBatchData::validateAndCreate([
+            'documents' => [validDocumentPayload(['currency' => 'USD'])],
+        ]);
+        $this->fail('expected validation exception');
+    } catch (ValidationException $e) {
+        expect(array_keys($e->errors()))->toContain('documents.0.exchange_rate');
+    }
 });
