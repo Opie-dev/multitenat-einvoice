@@ -4,6 +4,7 @@ namespace App\Data\Requests\Documents;
 
 use App\Enums\DocumentStatus;
 use App\Enums\DocumentType;
+use Closure;
 use Spatie\LaravelData\Data;
 use Spatie\LaravelData\Support\Validation\ValidationContext;
 
@@ -31,7 +32,16 @@ class DocumentFilterData extends Data
             'source_system' => ['nullable', 'string', 'max:50'],
             'source_ref' => ['nullable', 'string', 'max:191'],
             'issue_date_from' => ['nullable', 'date_format:Y-m-d'],
-            'issue_date_to' => ['nullable', 'date_format:Y-m-d'],
+            'issue_date_to' => [
+                'nullable', 'date_format:Y-m-d',
+                // Y-m-d strings compare lexicographically, so no date parsing is needed here.
+                function (string $attribute, mixed $value, Closure $fail) use ($context): void {
+                    $from = data_get($context->payload, 'issue_date_from');
+                    if (is_string($from) && is_string($value) && $value < $from) {
+                        $fail('issue_date_to must not be earlier than issue_date_from.');
+                    }
+                },
+            ],
         ];
     }
 }

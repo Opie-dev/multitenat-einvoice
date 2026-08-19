@@ -4,9 +4,11 @@ namespace App\Events;
 
 use App\Enums\DocumentStatus;
 use App\Models\Document;
+use Illuminate\Contracts\Events\ShouldDispatchAfterCommit;
 use Illuminate\Foundation\Events\Dispatchable;
 
-class DocumentTransitioned
+/** Dispatched only once the transition is durable; a no-op outside a transaction. */
+class DocumentTransitioned implements ShouldDispatchAfterCommit
 {
     use Dispatchable;
 

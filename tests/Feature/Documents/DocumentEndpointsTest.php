@@ -82,6 +82,12 @@ it('lists with filters, shows, and lists events; other tenants and environments 
     $this->withHeaders(apiKeyHeaders($this->tenant, 'production'))->getJson('/v1/documents')->assertOk()->assertJsonCount(0, 'data');
 });
 
+it('rejects an inverted issue date range', function () {
+    $this->withHeaders($this->h)->getJson('/v1/documents?issue_date_from=2026-08-10&issue_date_to=2026-08-01')
+        ->assertStatus(422)->assertJsonFragment(['pointer' => '/issue_date_to']);
+    $this->withHeaders($this->h)->getJson('/v1/documents?issue_date_from=2026-08-01&issue_date_to=2026-08-10')->assertOk();
+});
+
 it('submits a validated document and reports 409 for wrong states', function () {
     $id = $this->withHeaders($this->h)->postJson('/v1/documents', apiDocPayload($this->issuer, ['submit' => false]))->assertCreated()->assertJsonPath('data.status', 'validated')->json('data.id');
     $this->withHeaders($this->h)->postJson("/v1/documents/{$id}/submit")->assertOk()->assertJsonPath('data.status', 'queued');

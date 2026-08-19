@@ -49,6 +49,7 @@ return new class extends Migration
             $table->timestamps();
             $table->unique(['tenant_id', 'environment', 'source_system', 'source_ref', 'type'], 'documents_natural_key_unique');
             $table->index(['tenant_id', 'environment', 'status']);
+            $table->index(['tenant_id', 'environment', 'created_at', 'id'], 'documents_list_order_index');
             $table->index(['tenant_id', 'issuer_id']);
             $table->index(['tenant_id', 'group_id']);
             $table->index(['tenant_id', 'lhdn_uuid']);

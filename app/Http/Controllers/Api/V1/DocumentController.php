@@ -29,8 +29,9 @@ class DocumentController extends Controller
         $q->when($f->group_id, fn ($q) => $q->where('group_id', $f->group_id));
         $q->when($f->source_system, fn ($q) => $q->where('source_system', $f->source_system));
         $q->when($f->source_ref, fn ($q) => $q->where('source_ref', $f->source_ref));
-        $q->when($f->issue_date_from, fn ($q) => $q->whereDate('issue_date', '>=', $f->issue_date_from));
-        $q->when($f->issue_date_to, fn ($q) => $q->whereDate('issue_date', '<=', $f->issue_date_to));
+        // issue_date is a DATE column, so plain comparisons stay sargable (whereDate() wraps it in a function).
+        $q->when($f->issue_date_from, fn ($q) => $q->where('issue_date', '>=', $f->issue_date_from));
+        $q->when($f->issue_date_to, fn ($q) => $q->where('issue_date', '<=', $f->issue_date_to));
 
         return DocumentData::collect($q->orderByDesc('created_at')->orderByDesc('id')->cursorPaginate(50), CursorPaginatedDataCollection::class);
     }
