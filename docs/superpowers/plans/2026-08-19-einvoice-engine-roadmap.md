@@ -13,3 +13,16 @@ The spec is one service but four subsystems. Each plan below produces working, t
 | 5 | Plan 5 — Onboarding dashboard (UI/UX) | 13.2 (added 2026-08-19 at user request) | Merchant-facing web UI for self-service onboarding: sign-in via Billplz account, issuer wizard (business profile → TIN verify → LHDN access mode → intermediary consent / own credentials → certificate upload → sandbox test → go live), vendor onboarding for marketplaces (invite + progress tracking), API key management, document browser with status/errors, webhook setup. Front end: **Inertia.js + React** (user decision 2026-08-19), served by the engine app. Gets its own brainstorm + spec before planning (auth/SSO with Billplz accounts, UX flows, empty/error states, design system). |
 
 Follow-ups outside this repo (spec §13): SDK, portal, Catalog/Recurring/Affiliates integrations.
+
+## Plan 1 outcome (2026-08-19)
+
+Branch `plan-1-foundation`: 11 tasks + final fix wave; 91 Pest tests / 256 assertions, PHPStan level 8, Pint clean; CI on `master` + PRs (SQLite job and MySQL 8 + Redis job). Reviewed task-by-task and whole-branch (see the SDD ledger for rulings).
+
+### Backlog carried into Plan 2+ (deferred minors from reviews)
+- **First task of Plan 2:** tenant context for queued jobs — `TenantAware` job trait / base job that re-binds `TenantContext` in `handle()` (spec §3.1); `AuditLogger` should take an explicit context object rather than injecting `Request` (jobs/console).
+- `/v1/health` shares the unauthenticated IP throttle bucket — exempt it or point infra probes at `/up`.
+- `AuditLogger::diff()` — make `$original` a required parameter once a second caller exists; empty `X-Request-Id` header is stored as `''`.
+- Reference data: ETag should hash the payload (not only version+count); importer should prune codes withdrawn from LHDN lists; replace starter sets (unit_types, currencies, country_codes, msic_codes) with full LHDN SDK lists before go-live (Plan 3).
+- `ProblemResponse::describe()` → small readonly DTO; header-merge precedence comment; 401 `WWW-Authenticate` header.
+- CI: composer cache; `resources/views/welcome.blade.php` unreferenced (delete); `tests/Fixtures/certs/generate.sh` for reproducible fixture rotation; PHPStan paths to include `database/`.
+- `PutIssuerCertificateData`: allow empty PKCS#12 passphrase; add `Max` on PEM/base64 fields; distinct `pkcs12_not_base64` code.
