@@ -23,6 +23,16 @@ function documentFor(Tenant $t, Environment $environment = Environment::Sandbox)
     return $document;
 }
 
+function validDocumentFor(Tenant $t, Environment $environment = Environment::Sandbox): Document
+{
+    $issuer = Issuer::factory()->for($t)->create(['environment' => $environment]);
+    app(TenantContext::class)->bind($t, null, $environment);
+    $document = Document::factory()->for($issuer)->valid()->create(['environment' => $environment]);
+    app(TenantContext::class)->clear();
+
+    return $document;
+}
+
 /**
  * Every tenant-owned resource route must 404 for a different tenant.
  * When you add a tenant-scoped resource route in a later plan, add a row here.
@@ -41,6 +51,7 @@ dataset('cross_tenant_routes', function () {
         'document show' => [fn (Tenant $t) => documentFor($t), 'GET', '/v1/documents/{id}'],
         'document events' => [fn (Tenant $t) => documentFor($t), 'GET', '/v1/documents/{id}/events'],
         'document submit' => [fn (Tenant $t) => documentFor($t), 'POST', '/v1/documents/{id}/submit'],
+        'document cancel' => [fn (Tenant $t) => validDocumentFor($t), 'POST', '/v1/documents/{id}/cancel'],
     ];
 });
 
@@ -51,7 +62,7 @@ it('returns 404 for cross-tenant access', function (Closure $make, string $metho
     $url = str_replace('{id}', $resource->getKey(), $path);
 
     $this->withHeaders(serviceHeaders($intruder, 'sandbox'))
-        ->json($method, $url, ['name' => 'x', 'client_id' => 'a', 'client_secret' => 'b', 'format' => 'pem', 'certificate' => 'x', 'private_key' => 'y'])
+        ->json($method, $url, ['name' => 'x', 'client_id' => 'a', 'client_secret' => 'b', 'format' => 'pem', 'certificate' => 'x', 'private_key' => 'y', 'reason' => 'x'])
         ->assertStatus(404);
 })->with('cross_tenant_routes');
 
@@ -67,6 +78,7 @@ dataset('cross_environment_routes', function () {
         'document show (prod doc, test key)' => [fn (Tenant $t) => documentFor($t, Environment::Production), 'GET', '/v1/documents/{id}'],
         'document events (prod doc, test key)' => [fn (Tenant $t) => documentFor($t, Environment::Production), 'GET', '/v1/documents/{id}/events'],
         'document submit (prod doc, test key)' => [fn (Tenant $t) => documentFor($t, Environment::Production), 'POST', '/v1/documents/{id}/submit'],
+        'document cancel (prod doc, test key)' => [fn (Tenant $t) => validDocumentFor($t, Environment::Production), 'POST', '/v1/documents/{id}/cancel'],
     ];
 });
 

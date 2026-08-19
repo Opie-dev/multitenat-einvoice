@@ -2,8 +2,10 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Actions\Documents\CancelDocument;
 use App\Actions\Documents\CreateDocument;
 use App\Actions\Documents\SubmitDocument;
+use App\Data\Requests\Documents\CancelDocumentData;
 use App\Data\Requests\Documents\CreateDocumentData;
 use App\Data\Requests\Documents\DocumentFilterData;
 use App\Data\Resources\DocumentData;
@@ -62,6 +64,13 @@ class DocumentController extends Controller
         $audit->record('document.submitted', $doc, ['status' => $doc->status->value]);
 
         return response()->json(['data' => DocumentData::fromModel($doc)->toArray()], 200);
+    }
+
+    public function cancel(CancelDocumentData $data, Document $document, CancelDocument $cancel): JsonResponse
+    {
+        $doc = $cancel->handle($document, $data->reason);
+
+        return response()->json(['data' => DocumentData::fromModel($doc)->toArray()]);
     }
 
     /** @return DataCollection<int, DocumentEventData> */

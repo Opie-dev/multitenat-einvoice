@@ -61,6 +61,7 @@ Route::middleware('auth.api')->group(function () {
             Route::post('/documents', [DocumentController::class, 'store'])->middleware('idempotency');
             Route::post('/documents/batch', [DocumentBatchController::class, 'store'])->middleware('idempotency');
             Route::post('/documents/{document}/submit', [DocumentController::class, 'submit']);
+            Route::post('/documents/{document}/cancel', [DocumentController::class, 'cancel']);
         });
     });
 });

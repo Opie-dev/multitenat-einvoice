@@ -100,6 +100,13 @@ it('submits a validated document and reports 409 for wrong states', function () 
     expect(AuditLog::where('action', 'document.submitted')->count())->toBe(1);
 });
 
+it('resubmits an invalid document instead of rejecting it with a 409', function () {
+    app(TenantContext::class)->bind($this->tenant, null, Environment::Sandbox);
+    $invalid = Document::factory()->for($this->issuer)->create(['status' => 'invalid', 'lhdn_errors' => [['code' => 'X', 'message' => 'y']]]);
+    app(TenantContext::class)->clear();
+    $this->withHeaders($this->h)->postJson("/v1/documents/{$invalid->id}/submit")->assertOk()->assertJsonPath('data.status', 'queued');
+});
+
 it('enforces abilities', function () {
     $this->withHeaders(apiKeyHeaders($this->tenant, 'sandbox', ['read']))->postJson('/v1/documents', apiDocPayload($this->issuer))->assertStatus(403);
     $this->withHeaders(apiKeyHeaders($this->tenant, 'sandbox', ['documents:write']))->getJson('/v1/documents')->assertStatus(403);
