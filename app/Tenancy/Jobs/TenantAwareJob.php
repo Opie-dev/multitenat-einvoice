@@ -8,6 +8,13 @@ use App\Tenancy\TenantContext;
  * Give a queued job the tenant + environment it was dispatched under, and
  * re-bind them (via BindTenantContext middleware) when the job runs.
  * Call captureTenantContext() in the job constructor.
+ *
+ * Consuming jobs must also use Illuminate\Bus\Queueable (in addition to
+ * Dispatchable/InteractsWithQueue/SerializesModels). Without it,
+ * Bus\Dispatcher::dispatchSync() has no onConnection() to detect and falls
+ * back to dispatchNow(), which never runs the job's middleware() — so on the
+ * sync connection (and via dispatch_sync()) BindTenantContext would silently
+ * be skipped and the tenant context would never be rebound.
  */
 trait TenantAwareJob
 {
