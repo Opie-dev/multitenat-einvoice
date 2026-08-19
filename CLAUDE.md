@@ -33,7 +33,7 @@ Multi-tenant LHDN MyInvois e-invoicing engine (Laravel 12, PHP 8.3+, MySQL 8, Re
 - Secrets (LHDN client secrets, certificates, private keys, passphrases, API-key plaintext) live only in `encrypted` casts / `$hidden`, are never logged, never audited by value, never returned by any endpoint or DTO. Tests must assert this where relevant.
 - Never write real merchant TINs, certificates, or LHDN credentials into fixtures, docs, or tests. Test certs are generated locally (`tests/Fixtures/certs`).
 - Idempotency and uniqueness constraints are database-enforced, not just application-checked.
-- Do not disable Larastan rules or lower the PHPStan level to make CI pass; fix the code or add precise docblocks.
+- Do not disable Larastan rules or lower the PHPStan level to make `composer check` pass; fix the code or add precise docblocks.
 
 ## Testing rules
 - Pest. Feature tests use SQLite in-memory (`phpunit.xml`), `FakeLhdnClient` for LHDN, never the network.

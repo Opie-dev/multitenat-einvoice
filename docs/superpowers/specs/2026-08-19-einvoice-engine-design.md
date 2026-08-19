@@ -221,7 +221,7 @@ Versioning: URL prefix; breaking changes -> `/v2`.
 - **Feature:** every endpoint with `FakeLhdnClient`; tenancy isolation suite (for each route, tenant B cannot see tenant A resources); idempotency; batch; environment key/issuer mismatch.
 - **Integration (opt-in, `LHDN_SANDBOX_TESTS=1`):** real sandbox token, submit, poll, cancel.
 - **Static:** PHPStan level 8 (Larastan), Pint.
-- CI: GitHub Actions running the above on MySQL 8 + Redis services.
+- No hosted CI for now (user decision 2026-08-19); `composer check` (Pint + PHPStan level 8 + Pest) is the gate before every commit/merge.
 
 ## 11. Stack
 Laravel 12 · PHP 8.3 · MySQL 8 · Redis · Horizon · Pest · spatie/laravel-data · spatie/laravel-webhook-server · phpseclib (signing) · dompdf (PDF) · endroid/qr-code · Larastan · Pint. Repo: this folder (`billplz/einvoice-engine`), single app.

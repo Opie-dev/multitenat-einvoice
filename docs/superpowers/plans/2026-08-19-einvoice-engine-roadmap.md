@@ -16,7 +16,7 @@ Follow-ups outside this repo (spec §13): SDK, portal, Catalog/Recurring/Affilia
 
 ## Plan 1 outcome (2026-08-19)
 
-Branch `plan-1-foundation`: 11 tasks + final fix wave; 91 Pest tests / 256 assertions, PHPStan level 8, Pint clean; CI on `master` + PRs (SQLite job and MySQL 8 + Redis job). Reviewed task-by-task and whole-branch (see the SDD ledger for rulings).
+Branch `plan-1-foundation`: 11 tasks + final fix wave; 91 Pest tests / 256 assertions, PHPStan level 8, Pint clean; no hosted CI (removed at user request; `composer check` is the gate). Reviewed task-by-task and whole-branch (see the SDD ledger for rulings).
 
 ### Backlog carried into Plan 2+ (deferred minors from reviews)
 - **First task of Plan 2:** tenant context for queued jobs — `TenantAware` job trait / base job that re-binds `TenantContext` in `handle()` (spec §3.1); `AuditLogger` should take an explicit context object rather than injecting `Request` (jobs/console).
@@ -24,5 +24,5 @@ Branch `plan-1-foundation`: 11 tasks + final fix wave; 91 Pest tests / 256 asser
 - `AuditLogger::diff()` — make `$original` a required parameter once a second caller exists; empty `X-Request-Id` header is stored as `''`.
 - Reference data: ETag should hash the payload (not only version+count); importer should prune codes withdrawn from LHDN lists; replace starter sets (unit_types, currencies, country_codes, msic_codes) with full LHDN SDK lists before go-live (Plan 3).
 - `ProblemResponse::describe()` → small readonly DTO; header-merge precedence comment; 401 `WWW-Authenticate` header.
-- CI: composer cache; `resources/views/welcome.blade.php` unreferenced (delete); `tests/Fixtures/certs/generate.sh` for reproducible fixture rotation; PHPStan paths to include `database/`.
+- `resources/views/welcome.blade.php` unreferenced (delete); `tests/Fixtures/certs/generate.sh` for reproducible fixture rotation; PHPStan paths to include `database/`.
 - `PutIssuerCertificateData`: allow empty PKCS#12 passphrase; add `Max` on PEM/base64 fields; distinct `pkcs12_not_base64` code.
