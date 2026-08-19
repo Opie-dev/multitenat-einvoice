@@ -62,6 +62,8 @@ dataset('cross_environment_routes', function () {
         'issuer show' => [fn (Tenant $t) => Issuer::factory()->for($t)->create(['environment' => Environment::Production]), 'GET', '/v1/issuers/{id}'],
         'api key revoke' => [fn (Tenant $t) => ApiKey::generate($t, 'k', Environment::Production, ['read'])['key'], 'DELETE', '/v1/api-keys/{id}'],
         'document show (prod doc, test key)' => [fn (Tenant $t) => documentFor($t, Environment::Production), 'GET', '/v1/documents/{id}'],
+        'document events (prod doc, test key)' => [fn (Tenant $t) => documentFor($t, Environment::Production), 'GET', '/v1/documents/{id}/events'],
+        'document submit (prod doc, test key)' => [fn (Tenant $t) => documentFor($t, Environment::Production), 'POST', '/v1/documents/{id}/submit'],
     ];
 });
 
@@ -81,8 +83,9 @@ it('lists are empty for another tenant', function () {
     Issuer::factory()->for($owner)->create(['environment' => Environment::Sandbox]);
     Buyer::factory()->for($owner)->create();
     ApiKey::generate($owner, 'k', Environment::Sandbox, ['read']);
+    documentFor($owner);
 
-    foreach (['/v1/issuers', '/v1/buyers', '/v1/api-keys'] as $path) {
+    foreach (['/v1/issuers', '/v1/buyers', '/v1/api-keys', '/v1/documents'] as $path) {
         $this->withHeaders(serviceHeaders($intruder, 'sandbox'))->getJson($path)->assertOk()->assertJsonCount(0, 'data');
     }
 });
