@@ -3,10 +3,4 @@ includes:
 parameters:
     paths:
         - app
-        # RecordingTenantJob here is the only class using App\Tenancy\Jobs\TenantAwareJob
-        # until a real job consumes it in a later plan; PHPStan only analyses a trait
-        # in the context of a class that uses it (see
-        # https://phpstan.org/blog/how-phpstan-analyses-traits), so without this the
-        # trait would be reported as trait.unused and left unchecked.
-        - tests/Unit/Tenancy/TenantAwareJobTest.php
     level: 8
