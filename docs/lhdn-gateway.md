@@ -159,9 +159,19 @@ stalling a document forever.
    issuer is active are held (`issuer_not_active`) and released automatically
    on activation.
 
-A certificate expiring later (`cert_not_after` passing) moves an `active`
-issuer back to `suspended`; uploading a new certificate re-activates it and
-releases held documents again (spec §7.4).
+There is no daily monitor yet that notices a certificate expiring on its own
+(that's the spec §7.4 job, Plan 4 — see the limitations note in §8 below).
+Today, `IssuerActivator::apply()` only re-evaluates an issuer's status
+lazily, on `authorize` or a certificate upload: if it runs and finds the
+issuer `active` with an expired certificate (`hasValidCertificate()` false),
+it moves the issuer to `suspended` at that point. So an issuer whose
+certificate quietly expires stays `active` in the database — and the
+pipeline keeps trying to sign and submit its documents, which then hold with
+`certificate_expired` from `PrepareDocument`'s own check — until the next
+`authorize` or certificate upload runs `apply()` and catches up the status.
+Uploading a new (valid) certificate always re-activates and releases held
+documents, regardless of whether the stale status was ever corrected to
+`suspended` in between.
 
 ## 7. Sandbox tests
 
@@ -214,3 +224,6 @@ fixtures, or tests.
   (`submission.retry_backoff_seconds`, `poll.backoff_seconds`) rather than
   being hardcoded in the jobs, so they can be tuned per environment/deployment
   without a code change.
+
+**Not yet built (Plan 4):** certificate expiry monitor / automatic
+suspension, webhooks, consolidation, PDF.
