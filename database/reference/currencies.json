@@ -1,0 +1,5 @@
+{"version":"2026-08-starter","items":[
+ {"code":"MYR","description":"Malaysian Ringgit"},{"code":"USD","description":"US Dollar"},{"code":"SGD","description":"Singapore Dollar"},{"code":"EUR","description":"Euro"},
+ {"code":"GBP","description":"Pound Sterling"},{"code":"AUD","description":"Australian Dollar"},{"code":"JPY","description":"Yen"},{"code":"CNY","description":"Yuan Renminbi"},
+ {"code":"IDR","description":"Rupiah"},{"code":"THB","description":"Baht"},{"code":"HKD","description":"Hong Kong Dollar"},{"code":"INR","description":"Indian Rupee"}
+]}

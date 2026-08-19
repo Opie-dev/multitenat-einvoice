@@ -1,0 +1,5 @@
+{"version":"2026-08-starter","items":[
+ {"code":"MYS","description":"MALAYSIA"},{"code":"SGP","description":"SINGAPORE"},{"code":"IDN","description":"INDONESIA"},{"code":"THA","description":"THAILAND"},{"code":"BRN","description":"BRUNEI DARUSSALAM"},
+ {"code":"PHL","description":"PHILIPPINES"},{"code":"VNM","description":"VIET NAM"},{"code":"CHN","description":"CHINA"},{"code":"HKG","description":"HONG KONG"},{"code":"JPN","description":"JAPAN"},
+ {"code":"KOR","description":"KOREA, REPUBLIC OF"},{"code":"IND","description":"INDIA"},{"code":"AUS","description":"AUSTRALIA"},{"code":"GBR","description":"UNITED KINGDOM"},{"code":"USA","description":"UNITED STATES"}
+]}
