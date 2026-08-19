@@ -2,8 +2,10 @@
 
 namespace App\Providers;
 
+use App\Events\DocumentTransitioned;
 use App\Events\IssuerActivated;
 use App\Lhdn\Fake\FakeLhdnClient;
+use App\Listeners\PrepareDocumentOnQueued;
 use App\Listeners\ReleaseHeldDocumentsOnActivation;
 use App\Tenancy\TenantContext;
 use Illuminate\Cache\RateLimiting\Limit;
@@ -36,6 +38,7 @@ class AppServiceProvider extends ServiceProvider
                 ? 'cred:'.hash('sha256', (string) $request->bearerToken())
                 : 'ip:'.$request->ip()));
 
+        Event::listen(DocumentTransitioned::class, PrepareDocumentOnQueued::class);
         Event::listen(IssuerActivated::class, ReleaseHeldDocumentsOnActivation::class);
     }
 }

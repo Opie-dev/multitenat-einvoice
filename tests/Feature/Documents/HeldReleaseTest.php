@@ -5,6 +5,7 @@ use App\Enums\Environment;
 use App\Enums\HeldReason;
 use App\Enums\IssuerStatus;
 use App\Events\IssuerActivated;
+use App\Jobs\PrepareDocument;
 use App\Jobs\ReleaseHeldDocuments;
 use App\Models\Document;
 use App\Models\Issuer;
@@ -15,6 +16,9 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Queue;
 
 beforeEach(function () {
+    // The submission pipeline is covered end-to-end in tests/Feature/Lhdn/SubmissionPipelineTest;
+    // here the queued -> prepared handoff would otherwise hold these certificate-less issuers' documents.
+    Queue::fake([PrepareDocument::class]);
     $this->tenant = Tenant::factory()->create();
     app(TenantContext::class)->bind($this->tenant, null, Environment::Sandbox);
     $this->issuer = Issuer::factory()->for($this->tenant)->authorized()->create(['certificate_valid_until' => now()->addYear()]);
