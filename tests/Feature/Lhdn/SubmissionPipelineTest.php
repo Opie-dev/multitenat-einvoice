@@ -14,6 +14,9 @@ use App\Jobs\PrepareDocument;
 use App\Jobs\SubmitDocuments;
 use App\Lhdn\LhdnClientFactory;
 use App\Lhdn\LhdnException;
+use App\Lhdn\Signing\DocumentSigner;
+use App\Lhdn\Signing\SigningMaterial;
+use App\Lhdn\Ubl\UblDocumentBuilder;
 use App\Models\Document;
 use App\Models\Issuer;
 use App\Models\SubmissionAttempt;
@@ -34,6 +37,23 @@ function pipelineDoc(Issuer $issuer, array $overrides = []): Document
     ], $overrides);
 
     return app(CreateDocument::class)->handle(CreateDocumentData::from($payload))->document->refresh();
+}
+
+/**
+ * Sign a document with the test fixtures exactly the way PrepareDocument will, so
+ * a test can set a byte cap relative to the sizes this document actually produces.
+ *
+ * @return array{int, int} raw JSON bytes, then base64-encoded (wire) bytes
+ */
+function signedSizes(Document $document): array
+{
+    $material = new SigningMaterial(
+        (string) file_get_contents(base_path('tests/Fixtures/certs/test-cert.pem')),
+        (string) file_get_contents(base_path('tests/Fixtures/certs/test-key.pem')),
+    );
+    $signed = app(DocumentSigner::class)->sign(app(UblDocumentBuilder::class)->build($document), $material);
+
+    return [strlen($signed->json), strlen(base64_encode($signed->json))];
 }
 
 function pipelineSubmit(Issuer $issuer): SubmitDocuments
@@ -157,16 +177,31 @@ it('exposes the LHDN validation url once valid', function () {
     expect($data['lhdn']['validation_url'])->toBe("https://preprod.myinvois.hasil.gov.my/{$doc->lhdn_uuid}/share/{$doc->lhdn_long_id}");
 });
 
-it('rejects a document whose encoded payload exceeds the LHDN per-document limit', function () {
-    // The signed invoice is comfortably under 1 KB raw but over it once base64 encoded.
-    config(['lhdn.submission.max_document_bytes' => 1024]);
+it('measures the per-document limit against the encoded payload, not the raw JSON', function () {
     Queue::fake([SubmitDocuments::class]);
-    $doc = pipelineDoc($this->issuer)->refresh();
-    expect($doc->status)->toBe(DocumentStatus::Invalid)
-        ->and($doc->ubl_json)->toBeNull()
-        ->and($doc->lhdn_errors[0]['code'])->toBe('DOC_TOO_LARGE')
-        ->and($doc->events()->get()->last()->reason)->toBe('document_too_large');
+
+    // A cap strictly between the two sizes is the whole point of this test: sizing
+    // on the raw JSON would let this document through, wire sizing rejects it.
+    $tooBig = pipelineDoc($this->issuer, ['submit' => false]);
+    [$raw, $wire] = signedSizes($tooBig);
+    expect($wire)->toBeGreaterThan($raw);
+    config(['lhdn.submission.max_document_bytes' => intdiv($raw + $wire, 2)]);
+    app(DocumentStateMachine::class)->transition($tooBig, DocumentStatus::Queued, 'manual_submit');
+    expect($tooBig->refresh()->status)->toBe(DocumentStatus::Invalid)
+        ->and($tooBig->ubl_json)->toBeNull()
+        ->and($tooBig->lhdn_errors[0]['code'])->toBe('DOC_TOO_LARGE')
+        ->and($tooBig->events()->get()->last()->reason)->toBe('document_too_large');
     Queue::assertNotPushed(SubmitDocuments::class);
+
+    // One byte of headroom above the encoded size, and an identical document sails through.
+    $fits = pipelineDoc($this->issuer, ['submit' => false]);
+    [, $fitsWire] = signedSizes($fits);
+    config(['lhdn.submission.max_document_bytes' => $fitsWire + 1]);
+    app(DocumentStateMachine::class)->transition($fits, DocumentStatus::Queued, 'manual_submit');
+    expect($fits->refresh()->status)->toBe(DocumentStatus::Queued)
+        ->and($fits->ubl_json)->not->toBeNull()
+        ->and($fits->lhdn_errors)->toBeNull();
+    Queue::assertPushed(SubmitDocuments::class);
 });
 
 it('marks the whole batch invalid when LHDN rejects the submission outright', function () {
