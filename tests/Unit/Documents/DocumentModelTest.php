@@ -31,13 +31,28 @@ it('stores decimals as strings, casts enums, and scopes by tenant + environment'
     expect(Document::forCurrentEnvironment()->find($doc->id))->toBeNull();
 });
 
-it('enforces the natural idempotency key', function () {
+it('enforces the natural idempotency key within one environment', function () {
     $tenant = Tenant::factory()->create();
     app(TenantContext::class)->bind($tenant, null, Environment::Sandbox);
     $issuer = Issuer::factory()->for($tenant)->create();
     Document::factory()->for($issuer)->create(['source_system' => 'catalog', 'source_ref' => 'o1', 'type' => 'invoice']);
     Document::factory()->for($issuer)->create(['source_system' => 'catalog', 'source_ref' => 'o1', 'type' => 'invoice']);
 })->throws(UniqueConstraintViolationException::class);
+
+it('lets the same source reference exist in both environments', function () {
+    $tenant = Tenant::factory()->create();
+    $source = ['source_system' => 'catalog', 'source_ref' => 'o1', 'type' => 'invoice'];
+
+    app(TenantContext::class)->bind($tenant, null, Environment::Sandbox);
+    $sandboxIssuer = Issuer::factory()->for($tenant)->create(['environment' => Environment::Sandbox]);
+    Document::factory()->for($sandboxIssuer)->create($source + ['environment' => Environment::Sandbox]);
+
+    app(TenantContext::class)->bind($tenant, null, Environment::Production);
+    $productionIssuer = Issuer::factory()->for($tenant)->create(['environment' => Environment::Production]);
+    Document::factory()->for($productionIssuer)->create($source + ['environment' => Environment::Production]);
+
+    expect(Document::withoutGlobalScopes()->count())->toBe(2);
+});
 
 it('knows the cancellation window', function () {
     $tenant = Tenant::factory()->create();

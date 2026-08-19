@@ -23,8 +23,10 @@ class IdempotencyKey
             throw ProblemException::badRequest('Idempotency-Key must be 1–128 characters.', 'invalid_idempotency_key');
         }
         $tenantId = $this->context->tenant()->getKey();
-        $cacheKey = 'idem:'.$tenantId.':'.hash('sha256', $key);
-        $requestHash = hash('sha256', $request->method().'|'.$request->path().'|'.$request->getContent());
+        // Scoped by environment: the same key may be replayed independently in sandbox and production.
+        $environment = $this->context->environment()->value;
+        $cacheKey = 'idem:'.$tenantId.':'.$environment.':'.hash('sha256', $key);
+        $requestHash = hash('sha256', $request->method().'|'.$request->path().'|'.$environment.'|'.$request->getContent());
 
         /** @var array{status:int, content_type:?string, body:string, request_hash:string}|null $cached */
         $cached = Cache::get($cacheKey);

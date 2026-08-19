@@ -61,6 +61,20 @@ it('replays on identical natural key + payload and conflicts on a different payl
         ->toThrow(fn (ProblemException $e) => expect($e->status)->toBe(409)->and($e->problemCode)->toBe('idempotency_conflict'));
 });
 
+it('lets the same source reference create one document per environment', function () {
+    $payload = docPayload($this->issuer);
+    $sandbox = $this->create->handle(CreateDocumentData::from($payload));
+
+    app(TenantContext::class)->bind($this->tenant, null, Environment::Production);
+    $productionIssuer = Issuer::factory()->for($this->tenant)->active()->create(['environment' => Environment::Production]);
+    $production = $this->create->handle(CreateDocumentData::from(docPayload($productionIssuer, ['source' => $payload['source']])));
+
+    expect($production->replayed)->toBeFalse()
+        ->and($production->document->id)->not->toBe($sandbox->document->id)
+        ->and($production->document->environment)->toBe(Environment::Production)
+        ->and(Document::withoutGlobalScopes()->count())->toBe(2);
+});
+
 it('holds documents for inactive issuers and for issuers below the threshold', function () {
     $draftIssuer = Issuer::factory()->for($this->tenant)->create();
     $r = $this->create->handle(CreateDocumentData::from(docPayload($draftIssuer)));

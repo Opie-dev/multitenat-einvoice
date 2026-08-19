@@ -66,10 +66,10 @@ class CreateDocument
             ?? throw new ProblemException(404, 'Not Found', 'Issuer not found.', 'issuer_not_found');
     }
 
-    /** The natural key is unique per tenant across environments, so this query is deliberately not env-scoped. */
+    /** The natural key is unique per tenant *and* environment: the same source ref may be reused in sandbox and production. */
     private function existingByNaturalKey(CreateDocumentData $data): ?DocumentCreated
     {
-        $existing = Document::query()
+        $existing = Document::forCurrentEnvironment()
             ->where('source_system', $data->source->system)
             ->where('source_ref', $data->source->ref)
             ->where('type', $data->type)

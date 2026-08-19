@@ -41,3 +41,12 @@ it('rejects malformed keys', function () {
     $this->withHeaders(serviceHeaders($this->tenant) + ['Idempotency-Key' => str_repeat('x', 129)])->postJson('/v1/_test/idem', [])
         ->assertStatus(400)->assertJsonPath('code', 'invalid_idempotency_key');
 });
+
+it('scopes keys per environment', function () {
+    $key = ['Idempotency-Key' => 'same-key'];
+    $this->withHeaders(serviceHeaders($this->tenant, 'sandbox') + $key)->postJson('/v1/_test/idem', ['a' => 1])
+        ->assertCreated()->assertHeaderMissing('Idempotent-Replay');
+    $this->withHeaders(serviceHeaders($this->tenant, 'production') + $key)->postJson('/v1/_test/idem', ['a' => 1])
+        ->assertCreated()->assertHeaderMissing('Idempotent-Replay');
+    expect($this->calls)->toBe(2);
+});

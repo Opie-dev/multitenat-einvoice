@@ -111,7 +111,7 @@ Per-tenant `buyers` registry: `name`, `tin?`, `id_type/id_number?`, `sst_number?
 ### 5.2 Storage
 `documents` (tenant_id, issuer_id, group_id, type, status, buyer snapshot JSON, currency, totals, source_system, source_ref, lhdn_uuid, lhdn_long_id, lhdn_submission_uid, validated_at, submitted_at, lhdn_status_at, cancelled_at, cancel_reason, held_reason, consolidated_into_id, ubl_json (longtext), signed_payload_hash, pdf_path, metadata), `document_lines`, `document_events` (transition log), `submission_attempts` (request/response, http status, error codes, duration).
 
-Unique: `(tenant_id, source_system, source_ref, type)`.
+Unique: `(tenant_id, environment, source_system, source_ref, type)` — a merchant may reuse the same `source.ref` in sandbox and production.
 
 ### 5.3 State machine
 ```
@@ -126,8 +126,8 @@ consolidate=true documents: validated --> awaiting_consolidation --> consolidate
 - Cancellation window enforced against `lhdn_status_at` (validation time) + 72h; after that the API returns 409 with guidance to issue a credit/refund note.
 
 ### 5.4 Idempotency
-- Natural key `(tenant, source.system, source.ref, type)`: a repeat `POST /v1/documents` returns the existing document with `200` and header `Idempotent-Replay: true`, unless the payload differs materially (hash mismatch) -> 409.
-- Optional `Idempotency-Key` header stored 24h in Redis with the response body; identical key returns identical response.
+- Natural key `(tenant, environment, source.system, source.ref, type)` — the same `source.ref` may be reused across environments: a repeat `POST /v1/documents` returns the existing document with `200` and header `Idempotent-Replay: true`, unless the payload differs materially (hash mismatch) -> 409.
+- Optional `Idempotency-Key` header stored 24h in Redis with the response body, scoped per tenant + environment; identical key returns identical response.
 
 ### 5.5 Batch (multi-vendor)
 `POST /v1/documents/batch {documents: [DocumentData...]}` (max 100): all documents validated first; any schema failure fails the whole batch (422 with per-index errors); on success each document is created independently with a shared `group_id`. Submission and lifecycle are per document. `GET /v1/documents?group_id=` lists the group.
@@ -240,6 +240,7 @@ Laravel 12 · PHP 8.3 · MySQL 8 · Redis · Horizon · Pest · spatie/laravel-d
 | API DTOs | spatie/laravel-data for all request validation + response serialisation | user decision (2026-08-19); one typed contract per endpoint, reusable by the SDK later |
 | Dashboard front end | Inertia.js + React served by the engine | user decision (2026-08-19) |
 | Read abilities | GET issuers/buyers require `read` | least privilege; recorded during Plan 1 final review |
+| Natural key scoped by environment | sandbox→production reuse of source refs | Plan 2 final review |
 
 ## 13. Follow-up projects (out of scope here)
 1. `billplz/einvoice-sdk` PHP package (thin client + Laravel service provider).

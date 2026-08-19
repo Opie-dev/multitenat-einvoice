@@ -47,7 +47,7 @@ return new class extends Migration
             $table->string('cancel_reason', 300)->nullable();
             $table->ulid('consolidated_into_id')->nullable();
             $table->timestamps();
-            $table->unique(['tenant_id', 'source_system', 'source_ref', 'type'], 'documents_natural_key_unique');
+            $table->unique(['tenant_id', 'environment', 'source_system', 'source_ref', 'type'], 'documents_natural_key_unique');
             $table->index(['tenant_id', 'environment', 'status']);
             $table->index(['tenant_id', 'issuer_id']);
             $table->index(['tenant_id', 'group_id']);
