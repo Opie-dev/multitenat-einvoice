@@ -27,6 +27,7 @@ Multi-tenant LHDN MyInvois e-invoicing engine (Laravel 12, PHP 8.3+, MySQL 8, Re
 - **Domain code** (`app/Domain`, `app/Services`) has no HTTP dependencies. Controllers stay thin: DTO in → action/service → DTO out.
 - **LHDN gateway** (Plan 3+): all MyInvois calls go through `LhdnClient` implementations; never call LHDN from controllers; respect per-issuer token cache and rate budgets; every request/response is stored in `submission_attempts`.
 - **State changes** to documents go through `DocumentStateMachine` only; every transition writes `document_events` and dispatches an event.
+- **Event listeners** are registered explicitly in `AppServiceProvider::boot()`; auto-discovery is off (`bootstrap/app.php` sets `->withEvents(discover: false)`).
 - **IDs:** ULIDs (`HasUlids`) on every model. Timestamps stored UTC; business dates in `Asia/Kuala_Lumpur`.
 
 ## Security rules

@@ -68,6 +68,23 @@ it('clears the context after the job finishes', function () {
     expect($context->has())->toBeFalse();
 });
 
+it('restores the caller\'s own tenant context after an inline (sync) job finishes', function () {
+    $tenantA = Tenant::factory()->create();
+    $context = app(TenantContext::class);
+    $context->bind($tenantA, null, Environment::Sandbox);
+
+    // Job is constructed (and thus captures its tenant) while A is still bound.
+    $job = new RecordingTenantJob;
+
+    dispatch_sync($job);
+
+    expect(RecordingTenantJob::$seen)->toHaveCount(1)
+        ->and(RecordingTenantJob::$seen[0]['tenant'])->toBe($tenantA->id)
+        ->and($context->has())->toBeTrue()
+        ->and($context->tenant()->id)->toBe($tenantA->id)
+        ->and($context->environment())->toBe(Environment::Sandbox);
+});
+
 it('throws when constructed without a tenant context', function () {
     app(TenantContext::class)->clear();
     new RecordingTenantJob;

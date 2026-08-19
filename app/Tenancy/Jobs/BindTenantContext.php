@@ -19,12 +19,27 @@ class BindTenantContext
      * execution, findOrFail() throws ModelNotFoundException and the job
      * fails loudly rather than silently running with no/wrong tenant bound.
      *
+     * On the sync queue connection (or via dispatch_sync()), the job runs
+     * inline inside whatever call dispatched it — often a request that
+     * already has its own tenant context bound (e.g. a controller action
+     * that triggers an event whose listener dispatches this job). Blindly
+     * clearing the context in `finally` would wipe out that caller's
+     * context out from under it once the job finishes. So the previous
+     * context is snapshotted before rebinding and restored afterwards
+     * (restoring "no context" as a clear() when nothing was bound before);
+     * on the real queue-worker path there is no ambient context to restore,
+     * so this degrades to the old "always clear" behaviour.
+     *
      * @param  object{tenantId: string, tenantEnvironment: string}  $job
      */
     public function handle(object $job, Closure $next): mixed
     {
         /** @var TenantContext $context */
         $context = app(TenantContext::class);
+        $previousTenant = $context->tenantOrNull();
+        $previousActor = $context->actor();
+        $previousEnvironment = $context->environment();
+
         $tenant = Tenant::query()->findOrFail($job->tenantId);
         $context->bind(
             $tenant,
@@ -35,7 +50,11 @@ class BindTenantContext
         try {
             return $next($job);
         } finally {
-            $context->clear();
+            if ($previousTenant !== null) {
+                $context->bind($previousTenant, $previousActor, $previousEnvironment);
+            } else {
+                $context->clear();
+            }
         }
     }
 }
