@@ -2,8 +2,12 @@
 
 namespace App\Auth;
 
+/**
+ * @phpstan-type ActorType 'service'|'api_key'|'system'
+ */
 final class Actor
 {
+    // 'system' identifies the middleware-bound actor for tenant-aware queued jobs (see App\Tenancy\Jobs\BindTenantContext).
     /** @param string[] $abilities */
     public function __construct(
         public readonly string $type,
