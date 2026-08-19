@@ -15,7 +15,7 @@ class SubmitDocument
 
     public function handle(Document $document): Document
     {
-        if (! in_array($document->status, [DocumentStatus::Validated, DocumentStatus::Held], true)) {
+        if (! in_array($document->status, [DocumentStatus::Validated, DocumentStatus::Held, DocumentStatus::Invalid], true)) {
             throw ProblemException::conflict("Document in status {$document->status->value} cannot be submitted.", 'invalid_transition');
         }
 
@@ -27,7 +27,8 @@ class SubmitDocument
             throw ProblemException::conflict('The issuer is not active yet (TIN verification, LHDN authorisation and a valid certificate are required).', 'issuer_not_active');
         }
 
-        $this->stateMachine->transition($document, DocumentStatus::Queued, 'manual_submit');
+        $reason = $document->status === DocumentStatus::Invalid ? 'resubmit' : 'manual_submit';
+        $this->stateMachine->transition($document, DocumentStatus::Queued, $reason);
 
         return $document->refresh();
     }

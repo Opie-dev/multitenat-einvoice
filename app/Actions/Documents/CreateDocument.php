@@ -133,6 +133,8 @@ class CreateDocument
             'payload_hash' => $data->payloadHash(),
         ] + $totals->toStrings());
 
+        $document->forceFill(['lhdn_internal_id' => $document->id])->save();
+
         foreach ($this->lines($data) as $i => $line) {
             $lt = $totals->lines[$i];
             $document->lines()->create([
@@ -163,7 +165,7 @@ class CreateDocument
             return; // stays validated until POST /documents/{id}/submit
         }
         if (! $issuer->einvoice_required) {
-            $this->stateMachine->transition($document, DocumentStatus::Held, HeldReason::EinvoiceNotRequired->value);
+            $this->stateMachine->transition($document, DocumentStatus::Held, heldReason: HeldReason::EinvoiceNotRequired);
 
             return;
         }
@@ -174,7 +176,7 @@ class CreateDocument
         }
         if ($issuer->status !== IssuerStatus::Active) {
             $reason = $issuer->status === IssuerStatus::Suspended ? HeldReason::CertificateExpired : HeldReason::IssuerNotActive;
-            $this->stateMachine->transition($document, DocumentStatus::Held, $reason->value);
+            $this->stateMachine->transition($document, DocumentStatus::Held, heldReason: $reason);
 
             return;
         }

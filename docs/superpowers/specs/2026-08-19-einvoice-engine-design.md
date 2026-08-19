@@ -109,20 +109,24 @@ Per-tenant `buyers` registry: `name`, `tin?`, `id_type/id_number?`, `sst_number?
 - `group_id?`: set by batch endpoint
 
 ### 5.2 Storage
-`documents` (tenant_id, issuer_id, group_id, type, status, buyer snapshot JSON, currency, totals, source_system, source_ref, lhdn_uuid, lhdn_long_id, lhdn_submission_uid, validated_at, submitted_at, lhdn_status_at, cancelled_at, cancel_reason, held_reason, consolidated_into_id, ubl_json (longtext), signed_payload_hash, pdf_path, metadata), `document_lines`, `document_events` (transition log), `submission_attempts` (request/response, http status, error codes, duration).
+`documents` (tenant_id, issuer_id, group_id, type, status, buyer snapshot JSON, currency, totals, source_system, source_ref, lhdn_internal_id, lhdn_uuid, lhdn_long_id, lhdn_submission_uid, validated_at, submitted_at, lhdn_status_at, cancelled_at, cancel_reason, held_reason, consolidated_into_id, ubl_json (longtext), signed_payload_hash, pdf_path, submission_attempts_count, last_submission_error, next_submission_at, metadata), `document_lines`, `document_events` (transition log), `submission_attempts` (request/response, http status, error codes, duration).
+
+`lhdn_internal_id`: set to the document id at creation; unique per tenant; sent to LHDN as `codeNumber`/`Invoice.ID` so the internal and LHDN-facing identifiers never diverge. `submission_attempts_count`, `last_submission_error` and `next_submission_at` track retry/backoff state for the submission pipeline (§6.3–6.4).
 
 Unique: `(tenant_id, environment, source_system, source_ref, type)` — a merchant may reuse the same `source.ref` in sandbox and production.
 
 ### 5.3 State machine
 ```
 draft --validate--> validated --queue--> queued --batch--> submitted --poll--> valid
-                        |                                                 \--> invalid
+                        |          \--reject at submission--> invalid          \--> invalid
                         \--hold--> held --release--> queued
+                                    held --re-hold--> held
 valid --cancel (<=72h)--> cancelled        valid --buyer rejects--> rejected
 consolidate=true documents: validated --> awaiting_consolidation --> consolidated
 ```
 - `held` reasons: `issuer_not_active`, `certificate_expired`, `lhdn_credentials_invalid`, `lhdn_unavailable`, `einvoice_not_required` (stays stored, never submitted).
-- Transitions implemented in `DocumentStateMachine` (pure PHP), throwing `InvalidTransition`. Every transition writes `document_events` and dispatches a Laravel event consumed by the webhook dispatcher.
+- `queued -> invalid` covers documents LHDN rejects at submission time (before a `submitted` state is ever reached); `held -> held` covers re-holding an already-held document under a new reason.
+- Transitions implemented in `DocumentStateMachine` (pure PHP), throwing `InvalidTransition`. `transition()` takes a typed `HeldReason` (required whenever `$to` is `held`); the reason string recorded on `document_events` defaults to that enum's value. Every transition writes `document_events` and dispatches a Laravel event consumed by the webhook dispatcher.
 - Cancellation window enforced against `lhdn_status_at` (validation time) + 72h; after that the API returns 409 with guidance to issue a credit/refund note.
 
 ### 5.4 Idempotency
