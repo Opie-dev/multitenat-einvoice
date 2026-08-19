@@ -9,11 +9,13 @@ use App\Enums\DocumentStatus;
 use App\Enums\Environment;
 use App\Enums\HeldReason;
 use App\Exceptions\ProblemException;
+use App\Jobs\PrepareDocument;
 use App\Models\Buyer;
 use App\Models\Document;
 use App\Models\Issuer;
 use App\Models\Tenant;
 use App\Tenancy\TenantContext;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Validation\ValidationException;
 
 function docPayload(Issuer $issuer, array $overrides = []): array
@@ -31,6 +33,9 @@ function docPayload(Issuer $issuer, array $overrides = []): array
 }
 
 beforeEach(function () {
+    // The submission pipeline is covered end-to-end in tests/Feature/Lhdn/SubmissionPipelineTest;
+    // here the queued -> prepared handoff would otherwise hold these certificate-less issuers' documents.
+    Queue::fake([PrepareDocument::class]);
     $this->tenant = Tenant::factory()->create();
     app(TenantContext::class)->bind($this->tenant, null, Environment::Sandbox);
     $this->issuer = Issuer::factory()->for($this->tenant)->active()->create();
@@ -49,6 +54,7 @@ it('creates a validated document, computes totals, snapshots the buyer and queue
         ->and($doc->lines)->toHaveCount(1)
         ->and($doc->lines[0]->total)->toBe('22.26')
         ->and($doc->events()->pluck('to_status')->map->value->all())->toBe(['validated', 'queued']);
+    Queue::assertPushed(PrepareDocument::class, fn (PrepareDocument $job) => $job->documentId === $doc->id);
 });
 
 it('replays on identical natural key + payload and conflicts on a different payload', function () {

@@ -77,6 +77,7 @@ class DocumentData extends Data
             lhdn: $hasLhdn ? [
                 'uuid' => $d->lhdn_uuid, 'long_id' => $d->lhdn_long_id, 'submission_uid' => $d->lhdn_submission_uid,
                 'errors' => $d->lhdn_errors, 'status_at' => $d->lhdn_status_at?->toIso8601String(),
+                'validation_url' => self::validationUrl($d),
             ] : null,
             validated_at: $d->validated_at?->toIso8601String(),
             submitted_at: $d->submitted_at?->toIso8601String(),
@@ -86,5 +87,16 @@ class DocumentData extends Data
             created_at: $d->created_at->toIso8601String(),
             updated_at: $d->updated_at->toIso8601String(),
         );
+    }
+
+    /** The public MyInvois page for a validated document; only LHDN's own long id makes it shareable. */
+    private static function validationUrl(Document $d): ?string
+    {
+        if ($d->lhdn_uuid === null || $d->lhdn_long_id === null) {
+            return null;
+        }
+        $portal = rtrim((string) config("lhdn.environments.{$d->environment->value}.portal_base"), '/');
+
+        return $portal === '' ? null : "{$portal}/{$d->lhdn_uuid}/share/{$d->lhdn_long_id}";
     }
 }

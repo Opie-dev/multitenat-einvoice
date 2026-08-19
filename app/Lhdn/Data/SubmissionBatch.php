@@ -17,6 +17,12 @@ final class SubmissionBatch
         return (int) array_sum(array_map(fn (SubmissionDocument $d) => $d->sizeBytes(), $this->documents));
     }
 
+    /** Total base64-encoded size; this is what LHDN's per-submission limit applies to. */
+    public function wireSizeBytes(): int
+    {
+        return (int) array_sum(array_map(fn (SubmissionDocument $d) => $d->wireSizeBytes(), $this->documents));
+    }
+
     /** @return array{documents: list<array{format: string, documentHash: string, codeNumber: string, document: string}>} */
     public function toPayload(): array
     {

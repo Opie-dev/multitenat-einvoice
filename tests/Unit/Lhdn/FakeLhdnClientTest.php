@@ -35,6 +35,19 @@ it('builds a submission payload with hashes and base64 documents', function () {
         ->and($batch->sizeBytes())->toBe(7);
 });
 
+it('measures wire size as the base64 payload LHDN actually receives', function () {
+    // Budgets are enforced against the encoded form, which is 4/3 of the raw JSON
+    // rounded up to the next 4-byte group (padding included).
+    foreach (['' => 0, '{}' => 4, '{"a":1}' => 12, '{"ab":12}' => 12, '{"abc":123}' => 16] as $json => $expected) {
+        $document = SubmissionDocument::fromJson('DOC1', (string) $json);
+        expect($document->wireSizeBytes())->toBe($expected)
+            ->and($document->wireSizeBytes())->toBe(strlen(base64_encode((string) $json)));
+    }
+
+    $batch = new SubmissionBatch([SubmissionDocument::fromJson('D1', '{"a":1}'), SubmissionDocument::fromJson('D2', '{"abc":123}')]);
+    expect($batch->sizeBytes())->toBe(18)->and($batch->wireSizeBytes())->toBe(28);
+});
+
 it('submits, polls to valid, and can be scripted to reject/invalidate/fail', function () {
     $fake = fakeLhdn();
     $fake->rejectDocument('D2', 'CF321', 'Schema error');

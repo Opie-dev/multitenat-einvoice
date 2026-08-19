@@ -1,11 +1,13 @@
 <?php
 
 use App\Enums\Environment;
+use App\Jobs\PrepareDocument;
 use App\Models\AuditLog;
 use App\Models\Document;
 use App\Models\Issuer;
 use App\Models\Tenant;
 use App\Tenancy\TenantContext;
+use Illuminate\Support\Facades\Queue;
 
 function apiDocPayload(Issuer $issuer, array $overrides = []): array
 {
@@ -17,6 +19,9 @@ function apiDocPayload(Issuer $issuer, array $overrides = []): array
 }
 
 beforeEach(function () {
+    // The submission pipeline is covered end-to-end in tests/Feature/Lhdn/SubmissionPipelineTest;
+    // here the queued -> prepared handoff would otherwise hold these certificate-less issuers' documents.
+    Queue::fake([PrepareDocument::class]);
     $this->tenant = Tenant::factory()->create();
     $this->issuer = Issuer::factory()->for($this->tenant)->active()->create(); // sandbox
     $this->h = apiKeyHeaders($this->tenant, 'sandbox');

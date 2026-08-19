@@ -15,4 +15,14 @@ final class SubmissionDocument
     {
         return strlen($this->json);
     }
+
+    /**
+     * What the document actually costs on the wire: MyInvois takes it base64
+     * encoded, which inflates it by 4/3, and LHDN's size limits apply to that
+     * encoded form — so every size budget must be measured here, not on the raw JSON.
+     */
+    public function wireSizeBytes(): int
+    {
+        return (int) (4 * ceil(strlen($this->json) / 3));
+    }
 }
