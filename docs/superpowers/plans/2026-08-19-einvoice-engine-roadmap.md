@@ -26,3 +26,18 @@ Branch `plan-1-foundation`: 11 tasks + final fix wave; 91 Pest tests / 256 asser
 - `ProblemResponse::describe()` → small readonly DTO; header-merge precedence comment; 401 `WWW-Authenticate` header.
 - `resources/views/welcome.blade.php` unreferenced (delete); `tests/Fixtures/certs/generate.sh` for reproducible fixture rotation; PHPStan paths to include `database/`.
 - `PutIssuerCertificateData`: allow empty PKCS#12 passphrase; add `Max` on PEM/base64 fields; distinct `pkcs12_not_base64` code.
+
+## Plan 2 outcome (2026-08-19)
+
+Branch `plan-2-documents-core`: 10 tasks + final fix wave; 183 Pest tests / 558 assertions, PHPStan level 8, Pint clean, `failOnDeprecation` on. Spec amended: natural idempotency key is `(tenant_id, environment, source_system, source_ref, type)`; `Idempotency-Key` cache is per tenant+environment; event listeners are registered explicitly (auto-discovery off).
+
+### Backlog carried into Plan 3+ (deferred minors from reviews)
+- **Plan 3 first tasks:** `DocumentStateMachine::transition()` should take a typed `?HeldReason` (currently `HeldReason::from($reason)` can `ValueError`); add `held → held` re-hold (new reason after LHDN outage); `submission_attempts` storage; `ubl_json` / `signed_payload_hash` / `pdf_path` columns (spec §5.2); reuse `TenantAwareJob` (+ `Queueable`) for submission jobs.
+- Plan 4: `DocumentTransitioned` is already after-commit; add index on `consolidated_into_id` (and `original_document_id`) with the consolidation query.
+- Lists ignore `?limit=` (spec §8) — one shared fix across all cursor-paginated endpoints.
+- Batch: per-document audit rows (currently one `document.batch_created`); pre-flight duplicate natural-key check within a batch; natural-key conflicts surface as 409 mid-transaction (documented all-or-nothing).
+- `DocumentPaymentData.mode` validated by regex rather than the `payment_modes` reference set.
+- `Idempotency-Key`: no concurrency lock (DB natural key keeps outcomes correct); empty-string header passes through.
+- `CreateDocument` resolves the issuer before the natural-key replay (replay 404s if issuer removed).
+- Tests: top-level non-MYR `exchange_rate` enforcement; mixed-currency batch.
+- Plan doc `2026-08-19-plan-2-documents-core.md` still shows the pre-amendment natural key (historical).

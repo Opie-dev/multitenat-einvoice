@@ -3,6 +3,7 @@
 namespace App\Services\Issuers;
 
 use App\Enums\IssuerStatus;
+use App\Events\IssuerActivated;
 use App\Models\Issuer;
 
 class IssuerActivator
@@ -28,5 +29,8 @@ class IssuerActivator
             $issuer->activated_at = now();
         }
         $issuer->save();
+        if ($next === IssuerStatus::Active) {
+            IssuerActivated::dispatch($issuer);
+        }
     }
 }

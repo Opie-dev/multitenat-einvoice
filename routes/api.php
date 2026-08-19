@@ -2,6 +2,8 @@
 
 use App\Http\Controllers\Api\V1\ApiKeyController;
 use App\Http\Controllers\Api\V1\BuyerController;
+use App\Http\Controllers\Api\V1\DocumentBatchController;
+use App\Http\Controllers\Api\V1\DocumentController;
 use App\Http\Controllers\Api\V1\IssuerCertificateController;
 use App\Http\Controllers\Api\V1\IssuerController;
 use App\Http\Controllers\Api\V1\IssuerCredentialsController;
@@ -43,6 +45,17 @@ Route::middleware('auth.api')->group(function () {
         Route::middleware('ability:documents:write')->group(function () {
             Route::post('/buyers', [BuyerController::class, 'store']);
             Route::patch('/buyers/{buyer}', [BuyerController::class, 'update']);
+        });
+
+        Route::middleware('ability:read')->group(function () {
+            Route::get('/documents', [DocumentController::class, 'index']);
+            Route::get('/documents/{document}', [DocumentController::class, 'show']);
+            Route::get('/documents/{document}/events', [DocumentController::class, 'events']);
+        });
+        Route::middleware('ability:documents:write')->group(function () {
+            Route::post('/documents', [DocumentController::class, 'store'])->middleware('idempotency');
+            Route::post('/documents/batch', [DocumentBatchController::class, 'store'])->middleware('idempotency');
+            Route::post('/documents/{document}/submit', [DocumentController::class, 'submit']);
         });
     });
 });

@@ -3,6 +3,7 @@
 use App\Http\Middleware\AuthenticateApi;
 use App\Http\Middleware\EnsureAbility;
 use App\Http\Middleware\EnsureTenantContext;
+use App\Http\Middleware\IdempotencyKey;
 use App\Http\Problem\ProblemResponse;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -18,6 +19,10 @@ return Application::configure(basePath: dirname(__DIR__))
         commands: __DIR__.'/../routes/console.php',
         health: '/up',
     )
+    // Listeners are registered explicitly (App\Providers\AppServiceProvider::boot())
+    // for determinism; Laravel's automatic app/Listeners discovery is otherwise on
+    // by default and would double-register the same listener, firing it twice.
+    ->withEvents(discover: false)
     ->withMiddleware(function (Middleware $middleware): void {
         // spec 3.3: every /v1 request is throttled per credential (see the
         // 'api' limiter in App\Providers\AppServiceProvider).
@@ -27,6 +32,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'auth.api' => AuthenticateApi::class,
             'tenant' => EnsureTenantContext::class,
             'ability' => EnsureAbility::class,
+            'idempotency' => IdempotencyKey::class,
         ]);
 
         // Implicit route-model binding (SubstituteBindings) runs before route

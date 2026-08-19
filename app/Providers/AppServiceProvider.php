@@ -2,9 +2,12 @@
 
 namespace App\Providers;
 
+use App\Events\IssuerActivated;
+use App\Listeners\ReleaseHeldDocumentsOnActivation;
 use App\Tenancy\TenantContext;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 
@@ -30,5 +33,7 @@ class AppServiceProvider extends ServiceProvider
             ->by($request->bearerToken() !== null
                 ? 'cred:'.hash('sha256', (string) $request->bearerToken())
                 : 'ip:'.$request->ip()));
+
+        Event::listen(IssuerActivated::class, ReleaseHeldDocumentsOnActivation::class);
     }
 }
