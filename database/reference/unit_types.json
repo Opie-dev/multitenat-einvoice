@@ -1,0 +1,5 @@
+{"version":"2026-08-starter","items":[
+ {"code":"C62","description":"one (unit)"},{"code":"EA","description":"each"},{"code":"KGM","description":"kilogram"},{"code":"GRM","description":"gram"},{"code":"MTR","description":"metre"},
+ {"code":"LTR","description":"litre"},{"code":"MLT","description":"millilitre"},{"code":"HUR","description":"hour"},{"code":"DAY","description":"day"},{"code":"WEE","description":"week"},
+ {"code":"MON","description":"month"},{"code":"ANN","description":"year"},{"code":"XPK","description":"package"},{"code":"XBX","description":"box"},{"code":"SET","description":"set"}
+]}

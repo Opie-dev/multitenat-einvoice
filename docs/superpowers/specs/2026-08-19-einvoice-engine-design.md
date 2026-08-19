@@ -162,7 +162,7 @@ Per document (queued job `PrepareDocument`): `BuildUbl` (UBL 2.1 JSON per LHDN S
 ## 7. Supporting services
 
 ### 7.1 Reference data
-Tables: `ref_msic_codes`, `ref_classification_codes`, `ref_tax_types`, `ref_unit_types`, `ref_currencies`, `ref_state_codes`, `ref_country_codes`, `ref_payment_modes`, `ref_document_types`. Seeded from LHDN SDK JSON; `einvoice:refresh-reference-data` artisan command; version column; read via `GET /v1/reference/{set}` (cached, ETag).
+Table: `reference_codes` (`set`, `code`, `description`, `extra` json, `version`; unique `(set, code)`) holding all nine LHDN code lists. Seeded from LHDN SDK JSON; `einvoice:refresh-reference-data` artisan command; version column; read via `GET /v1/reference/{set}` (cached, ETag).
 
 ### 7.2 Webhooks
 `webhook_endpoints` per tenant (url, secret, events[], enabled, environment). Delivery via spatie/laravel-webhook-server: HMAC-SHA256 signature header, retries with backoff (up to 24h), `webhook_deliveries` log, manual redelivery endpoint. Events: `document.validated`, `document.held`, `document.queued`, `document.submitted`, `document.valid`, `document.invalid`, `document.cancelled`, `document.rejected`, `document.consolidated`, `issuer.status_changed`, `certificate.expiring`, `certificate.expired`.
