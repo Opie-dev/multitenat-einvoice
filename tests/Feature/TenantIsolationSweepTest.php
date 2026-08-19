@@ -33,6 +33,8 @@ dataset('cross_tenant_routes', function () {
         'issuer update' => [fn (Tenant $t) => Issuer::factory()->for($t)->create(['environment' => Environment::Sandbox]), 'PATCH', '/v1/issuers/{id}'],
         'issuer credentials' => [fn (Tenant $t) => Issuer::factory()->for($t)->create(['environment' => Environment::Sandbox, 'lhdn_mode' => 'own_credentials']), 'PUT', '/v1/issuers/{id}/credentials'],
         'issuer certificate' => [fn (Tenant $t) => Issuer::factory()->for($t)->create(['environment' => Environment::Sandbox]), 'PUT', '/v1/issuers/{id}/certificate'],
+        'issuer verify-tin' => [fn (Tenant $t) => Issuer::factory()->for($t)->create(['environment' => Environment::Sandbox]), 'POST', '/v1/issuers/{id}/verify-tin'],
+        'issuer authorize' => [fn (Tenant $t) => Issuer::factory()->for($t)->create(['environment' => Environment::Sandbox]), 'POST', '/v1/issuers/{id}/authorize'],
         'buyer show' => [fn (Tenant $t) => Buyer::factory()->for($t)->create(), 'GET', '/v1/buyers/{id}'],
         'buyer update' => [fn (Tenant $t) => Buyer::factory()->for($t)->create(), 'PATCH', '/v1/buyers/{id}'],
         'api key revoke' => [fn (Tenant $t) => ApiKey::generate($t, 'k', Environment::Sandbox, ['read'])['key'], 'DELETE', '/v1/api-keys/{id}'],
@@ -60,6 +62,7 @@ it('returns 404 for cross-tenant access', function (Closure $make, string $metho
 dataset('cross_environment_routes', function () {
     return [
         'issuer show' => [fn (Tenant $t) => Issuer::factory()->for($t)->create(['environment' => Environment::Production]), 'GET', '/v1/issuers/{id}'],
+        'issuer verify-tin (prod issuer, test key)' => [fn (Tenant $t) => Issuer::factory()->for($t)->create(['environment' => Environment::Production]), 'POST', '/v1/issuers/{id}/verify-tin'],
         'api key revoke' => [fn (Tenant $t) => ApiKey::generate($t, 'k', Environment::Production, ['read'])['key'], 'DELETE', '/v1/api-keys/{id}'],
         'document show (prod doc, test key)' => [fn (Tenant $t) => documentFor($t, Environment::Production), 'GET', '/v1/documents/{id}'],
         'document events (prod doc, test key)' => [fn (Tenant $t) => documentFor($t, Environment::Production), 'GET', '/v1/documents/{id}/events'],
