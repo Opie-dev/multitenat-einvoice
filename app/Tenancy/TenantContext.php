@@ -2,6 +2,7 @@
 
 namespace App\Tenancy;
 
+use App\Auth\Actor;
 use App\Enums\Environment;
 use App\Models\Tenant;
 use App\Tenancy\Exceptions\NoTenantContext;
@@ -10,11 +11,11 @@ class TenantContext
 {
     private ?Tenant $tenant = null;
 
-    private ?object $actor = null;
+    private ?Actor $actor = null;
 
     private Environment $environment = Environment::Production;
 
-    public function bind(?Tenant $tenant, ?object $actor, Environment $environment): void
+    public function bind(?Tenant $tenant, ?Actor $actor, Environment $environment): void
     {
         $this->tenant = $tenant;
         $this->actor = $actor;
@@ -43,7 +44,7 @@ class TenantContext
         return $this->tenant;
     }
 
-    public function actor(): ?object
+    public function actor(): ?Actor
     {
         return $this->actor;
     }
