@@ -4,3 +4,9 @@ parameters:
     paths:
         - app
     level: 8
+    ignoreErrors:
+        # BelongsToTenant gets its first consumer (ApiKey) in Task 5; PHPStan's
+        # reportUnmatchedIgnoredErrors will then force this entry to be removed.
+        -
+            identifier: trait.unused
+            path: app/Tenancy/BelongsToTenant.php
