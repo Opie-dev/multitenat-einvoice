@@ -7,6 +7,20 @@ use App\Models\Tenant;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
+// Windows PHP builds need an OpenSSL config for openssl_pkey_export(); Linux does not.
+if (getenv('OPENSSL_CONF') === false) {
+    foreach ([
+        'C:/Program Files/Git/usr/ssl/openssl.cnf',
+        'C:/Program Files/Git/mingw64/etc/ssl/openssl.cnf',
+    ] as $candidate) {
+        if (is_file($candidate)) {
+            putenv("OPENSSL_CONF={$candidate}");
+            $_ENV['OPENSSL_CONF'] = $_SERVER['OPENSSL_CONF'] = $candidate;
+            break;
+        }
+    }
+}
+
 pest()->extend(TestCase::class)->use(RefreshDatabase::class)->in('Feature');
 pest()->extend(TestCase::class)->in('Unit');
 
