@@ -3,6 +3,7 @@
 namespace App\Providers;
 
 use App\Events\IssuerActivated;
+use App\Lhdn\Fake\FakeLhdnClient;
 use App\Listeners\ReleaseHeldDocumentsOnActivation;
 use App\Tenancy\TenantContext;
 use Illuminate\Cache\RateLimiting\Limit;
@@ -19,6 +20,7 @@ class AppServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->app->scoped(TenantContext::class);
+        $this->app->singleton(FakeLhdnClient::class);
     }
 
     /**
