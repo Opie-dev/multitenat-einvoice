@@ -15,4 +15,16 @@ return [
 
     'rate_limit_per_minute' => (int) env('EINVOICE_RATE_LIMIT_PER_MINUTE', 60),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Idempotency-Key TTL
+    |--------------------------------------------------------------------------
+    |
+    | Hours a cached response for an Idempotency-Key is retained (see
+    | App\Http\Middleware\IdempotencyKey).
+    |
+    */
+
+    'idempotency_ttl_hours' => (int) env('EINVOICE_IDEMPOTENCY_TTL_HOURS', 24),
+
 ];
