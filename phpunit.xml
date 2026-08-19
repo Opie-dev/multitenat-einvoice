@@ -32,5 +32,10 @@
         <env name="PULSE_ENABLED" value="false"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
         <env name="NIGHTWATCH_ENABLED" value="false"/>
+        <!-- Windows/Git-Bash PHP build has no default OpenSSL config path, so
+             openssl_pkey_export() fails with "configuration file routines:
+             no such file" when exporting a key. Point it at Git's bundled
+             openssl.cnf so certificate parsing works in tests. -->
+        <env name="OPENSSL_CONF" value="C:/Program Files/Git/usr/ssl/openssl.cnf"/>
     </php>
 </phpunit>

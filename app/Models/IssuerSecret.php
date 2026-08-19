@@ -2,35 +2,66 @@
 
 namespace App\Models;
 
+use App\Tenancy\BelongsToTenant;
 use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Carbon;
 
 /**
- * Placeholder model — Task 7 replaces this file with the full credential/certificate implementation.
- *
  * @property string $id
+ * @property string $tenant_id
  * @property string $issuer_id
+ * @property string|null $lhdn_client_id
+ * @property string|null $lhdn_client_secret
+ * @property string|null $signing_certificate
+ * @property string|null $signing_key
  * @property string|null $cert_subject
  * @property string|null $cert_serial
  * @property string|null $cert_fingerprint
  * @property Carbon|null $cert_not_before
  * @property Carbon|null $cert_not_after
+ * @property Carbon|null $credentials_verified_at
+ * @property Carbon $created_at
+ * @property Carbon $updated_at
  */
 class IssuerSecret extends Model
 {
-    use HasUlids;
+    use BelongsToTenant, HasUlids;
 
     /** @var list<string> */
     protected $guarded = ['id'];
 
+    /** @var list<string> */
+    protected $hidden = ['lhdn_client_id', 'lhdn_client_secret', 'signing_certificate', 'signing_key'];
+
+    /** @return array<string, string> */
+    protected function casts(): array
+    {
+        return [
+            'lhdn_client_id' => 'encrypted',
+            'lhdn_client_secret' => 'encrypted',
+            'signing_certificate' => 'encrypted',
+            'signing_key' => 'encrypted',
+            'cert_not_before' => 'datetime',
+            'cert_not_after' => 'datetime',
+            'credentials_verified_at' => 'datetime',
+        ];
+    }
+
+    /** @return BelongsTo<Issuer, $this> */
+    public function issuer(): BelongsTo
+    {
+        return $this->belongsTo(Issuer::class);
+    }
+
     public function hasCredentials(): bool
     {
-        return false;
+        return $this->lhdn_client_id !== null && $this->lhdn_client_secret !== null;
     }
 
     public function hasCertificate(): bool
     {
-        return false;
+        return $this->signing_certificate !== null && $this->signing_key !== null;
     }
 }

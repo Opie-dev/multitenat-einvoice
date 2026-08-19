@@ -35,4 +35,19 @@ return [
         ],
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | OpenSSL configuration file override
+    |--------------------------------------------------------------------------
+    |
+    | Some Windows PHP builds resolve the openssl extension's default config
+    | at module init time, so openssl_pkey_export() can fail with a
+    | "configuration file routines" error even when OPENSSL_CONF is set in
+    | the environment. App\Services\Certificates\CertificateParser passes
+    | this path explicitly to sidestep that timing issue. Unset in
+    | production/Linux, where the system default config resolves correctly.
+    |
+    */
+    'openssl_conf' => env('OPENSSL_CONF'),
+
 ];

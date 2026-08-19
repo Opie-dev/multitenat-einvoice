@@ -2,7 +2,9 @@
 
 use App\Http\Controllers\Api\V1\ApiKeyController;
 use App\Http\Controllers\Api\V1\BuyerController;
+use App\Http\Controllers\Api\V1\IssuerCertificateController;
 use App\Http\Controllers\Api\V1\IssuerController;
+use App\Http\Controllers\Api\V1\IssuerCredentialsController;
 use App\Http\Controllers\Api\V1\MeController;
 use App\Http\Controllers\Api\V1\ReferenceController;
 use App\Http\Controllers\Api\V1\TenantController;
@@ -30,6 +32,8 @@ Route::middleware('auth.api')->group(function () {
         Route::middleware('ability:issuers:manage')->group(function () {
             Route::post('/issuers', [IssuerController::class, 'store']);
             Route::patch('/issuers/{issuer}', [IssuerController::class, 'update']);
+            Route::put('/issuers/{issuer}/credentials', [IssuerCredentialsController::class, 'update']);
+            Route::put('/issuers/{issuer}/certificate', [IssuerCertificateController::class, 'update']);
         });
 
         Route::middleware('ability:read')->group(function () {
