@@ -172,7 +172,11 @@ class SubmitDocuments implements ShouldQueue
 
                 continue;
             }
-            if ($e->kind === LhdnErrorKind::Terminal) {
+            // Only an unambiguous rejection of the payload we sent (400/422) justifies
+            // failing the whole batch: any other terminal status (404, 405, 409, 408…)
+            // is about the request plumbing, so those retry like a transient failure
+            // rather than declaring every invoice in the batch invalid.
+            if ($e->kind === LhdnErrorKind::Terminal && in_array($e->httpStatus, [400, 422], true)) {
                 $errors = SubmissionErrors::fromException($e);
                 $document->forceFill(['last_submission_error' => $summary, 'lhdn_errors' => $errors, 'submission_attempts_count' => $attempts])->save();
                 $stateMachine->transition($document, DocumentStatus::Invalid, 'rejected_at_submission', ['errors' => $errors]);

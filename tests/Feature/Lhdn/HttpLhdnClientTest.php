@@ -5,6 +5,7 @@ use App\Lhdn\CircuitBreaker;
 use App\Lhdn\Data\SubmissionBatch;
 use App\Lhdn\Data\SubmissionDocument;
 use App\Lhdn\Http\HttpLhdnClient;
+use App\Lhdn\Http\TokenProvider;
 use App\Lhdn\LhdnCredentials;
 use App\Lhdn\LhdnErrorKind;
 use App\Lhdn\LhdnException;
@@ -130,4 +131,37 @@ it('classifies an array error body without a message key by json-encoding it', f
     ]);
 
     expect(fn () => $this->client->cancelDocument($this->issuer, 'U1', 'reason'))->toThrow(fn (LhdnException $e) => expect($e->kind)->toBe(LhdnErrorKind::Terminal)->and($e->getMessage())->toContain('detail'));
+});
+
+it('does not record or count a limiter rejection in the token path', function () {
+    config(['lhdn.rate_limits.token' => 1, 'lhdn.circuit_breaker' => ['failure_threshold' => 1, 'cooldown_seconds' => 60]]);
+    Http::fake(['https://lhdn.test/connect/token' => Http::response(['access_token' => 'abc', 'expires_in' => 3600])]);
+
+    expect($this->client->token($this->issuer)->token)->toBe('abc');
+    expect(SubmissionAttempt::count())->toBe(1);
+
+    // Second fetch is refused by our own budget before any request is sent: no
+    // attempt row to record, and nothing for the breaker to blame LHDN for.
+    app(TokenProvider::class)->forget(Environment::Sandbox, $this->creds);
+    expect(fn () => $this->client->token($this->issuer))
+        ->toThrow(fn (LhdnException $e) => expect($e->kind)->toBe(LhdnErrorKind::Transient)->and($e->httpStatus)->toBe(429));
+    expect(SubmissionAttempt::count())->toBe(1)
+        ->and(app(CircuitBreaker::class)->isOpen(Environment::Sandbox))->toBeFalse();
+});
+
+it('keeps the breaker closed for an LHDN 429 but opens it on a 5xx', function () {
+    config(['lhdn.circuit_breaker' => ['failure_threshold' => 1, 'cooldown_seconds' => 60]]);
+    Http::fake([
+        'https://lhdn.test/connect/token' => Http::response(['access_token' => 'abc', 'expires_in' => 3600]),
+        'https://lhdn.test/api/v1.0/documentsubmissions' => Http::sequence()->push(['error' => 'slow down'], 429)->push(['error' => 'down'], 503),
+    ]);
+    $batch = new SubmissionBatch([SubmissionDocument::fromJson('D1', '{}')]);
+
+    expect(fn () => $this->client->submitDocuments($this->issuer, $batch))
+        ->toThrow(fn (LhdnException $e) => expect($e->kind)->toBe(LhdnErrorKind::Transient)->and($e->httpStatus)->toBe(429));
+    expect(app(CircuitBreaker::class)->isOpen(Environment::Sandbox))->toBeFalse();
+
+    expect(fn () => $this->client->submitDocuments($this->issuer, $batch))
+        ->toThrow(fn (LhdnException $e) => expect($e->httpStatus)->toBe(503));
+    expect(app(CircuitBreaker::class)->isOpen(Environment::Sandbox))->toBeTrue();
 });

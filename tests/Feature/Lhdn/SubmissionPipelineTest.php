@@ -279,3 +279,19 @@ it('leaves a document submitted when the per-document check also fails', functio
 
     expect($doc->refresh()->status)->toBe(DocumentStatus::Submitted)->and($doc->lhdn_errors)->toBeNull();
 });
+
+it('retries rather than invalidating when a submission fails with a non-payload terminal status', function () {
+    config(['lhdn.submission.max_attempts' => 3, 'lhdn.submission.retry_backoff_seconds' => [30]]);
+    Queue::fake([SubmitDocuments::class, PollSubmission::class]);
+    $doc = pipelineDoc($this->issuer);
+    // 404 is about the endpoint we called, not about the invoice we sent.
+    fakeLhdn()->failNextWith(LhdnException::terminal('no such route', 404), 'submit');
+    pipelineSubmit($this->issuer);
+
+    expect($doc->refresh()->status)->toBe(DocumentStatus::Queued)
+        ->and($doc->submission_attempts_count)->toBe(1)
+        ->and($doc->next_submission_at)->not->toBeNull()
+        ->and($doc->lhdn_errors)->toBeNull()
+        ->and($doc->last_submission_error['kind'])->toBe('terminal');
+    Queue::assertPushed(SubmitDocuments::class);
+});

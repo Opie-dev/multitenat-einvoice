@@ -113,14 +113,23 @@ class HttpLhdnClient implements LhdnClient
     {
         $start = hrtime(true);
         $request = ['client_id' => substr($this->credentials->clientId, 0, 4).'***', 'scope' => 'InvoicingAPI', 'onbehalfof' => $this->credentials->onBehalfOf];
+        // Mirrors call(): an open breaker or an exhausted local rate budget is our own
+        // bookkeeping, not something LHDN said. Those must propagate untouched — no
+        // submission_attempts row for a request that never left the process, and no
+        // breaker failure for a rejection the breaker/limiter produced itself.
+        $sent = false;
         try {
             $this->breaker->guard($this->environment);
-            $response = $this->limiter->attempt($issuer, 'token', fn () => $this->identity()->asForm()->post('/connect/token', [
-                'grant_type' => 'client_credentials',
-                'client_id' => $this->credentials->clientId,
-                'client_secret' => $this->credentials->clientSecret,
-                'scope' => 'InvoicingAPI',
-            ]));
+            $response = $this->limiter->attempt($issuer, 'token', function () use (&$sent) {
+                $sent = true;
+
+                return $this->identity()->asForm()->post('/connect/token', [
+                    'grant_type' => 'client_credentials',
+                    'client_id' => $this->credentials->clientId,
+                    'client_secret' => $this->credentials->clientSecret,
+                    'scope' => 'InvoicingAPI',
+                ]);
+            });
             $data = $this->classify($response);
             $token = new AccessToken((string) $data['access_token'], CarbonImmutable::now()->addSeconds((int) ($data['expires_in'] ?? 3600)));
             $this->attempts->record($issuer, $this->environment, 'token', null, null, $response->status(), $request, ['expires_in' => $data['expires_in'] ?? null], null, $this->ms($start));
@@ -133,12 +142,26 @@ class HttpLhdnClient implements LhdnClient
             $this->breaker->recordFailure($this->environment);
             throw $ex;
         } catch (LhdnException $e) {
+            if (! $sent) {
+                throw $e;
+            }
             $this->attempts->record($issuer, $this->environment, 'token', null, null, $e->httpStatus, $request, $e->payload, $e, $this->ms($start));
-            if ($e->kind === LhdnErrorKind::Transient) {
+            if ($this->countsAsBreakerFailure($e)) {
                 $this->breaker->recordFailure($this->environment);
             }
             throw $e;
         }
+    }
+
+    /**
+     * Only a platform-level problem may open the breaker: a connection failure or a
+     * 5xx. An HTTP 429 from MyInvois is a per-taxpayer rate limit, so counting it
+     * would stop batching for every other issuer in the environment because one
+     * issuer was noisy.
+     */
+    private function countsAsBreakerFailure(LhdnException $e): bool
+    {
+        return $e->kind === LhdnErrorKind::Transient && ($e->httpStatus ?? 500) >= 500;
     }
 
     /**
@@ -185,7 +208,7 @@ class HttpLhdnClient implements LhdnClient
             if ($e->kind === LhdnErrorKind::Auth) {
                 $this->tokens->forget($this->environment, $this->credentials);
             }
-            if ($e->kind === LhdnErrorKind::Transient) {
+            if ($this->countsAsBreakerFailure($e)) {
                 $this->breaker->recordFailure($this->environment);
             }
             throw $e;
