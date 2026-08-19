@@ -624,7 +624,6 @@ it('renders unknown routes as 404 problem', function () {
 
 it('hides internal error details when debug is off', function () {
     config(['app.debug' => false]);
-    $this->withoutExceptionHandling(false);
     $this->getJson('/v1/_test/boom')
         ->assertStatus(500)
         ->assertJsonPath('title', 'Internal Server Error')
@@ -1749,7 +1748,7 @@ class ApiKeyResource extends JsonResource
 
     public function toArray(Request $request): array
     {
-        return array_filter([
+        $data = [
             'id' => $this->id,
             'name' => $this->name,
             'prefix' => $this->prefix,
@@ -1757,8 +1756,12 @@ class ApiKeyResource extends JsonResource
             'abilities' => $this->abilities,
             'last_used_at' => $this->last_used_at?->toIso8601String(),
             'created_at' => $this->created_at?->toIso8601String(),
-            'key' => $this->plaintext,
-        ], fn ($v) => $v !== null);
+        ];
+        if ($this->plaintext !== null) {
+            $data['key'] = $this->plaintext; // shown once, on creation only
+        }
+
+        return $data;
     }
 }
 ```
@@ -2487,6 +2490,8 @@ openssl genrsa -out tests/Fixtures/certs/other-key.pem 2048
 openssl rsa -in tests/Fixtures/certs/test-key.pem -aes256 -passout pass:keypass -out tests/Fixtures/certs/test-key-encrypted.pem
 ```
 (The `-keypbe/-certpbe AES-256-CBC` flags matter: PHP's OpenSSL 3 rejects the legacy RC2 defaults of OpenSSL 1.1.1.)
+
+Windows note: if `openssl_pkey_export()` fails in tests with a "configuration file routines" error, point PHP at a config file — add `<env name="OPENSSL_CONF" value="C:/Program Files/Git/usr/ssl/openssl.cnf"/>` to the `<php>` block of `phpunit.xml` (path per machine) — then re-run.
 
 - [ ] **Step 2: Write failing tests**
 
