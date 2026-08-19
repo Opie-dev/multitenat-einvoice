@@ -7,9 +7,11 @@ use App\Http\Controllers\Api\V1\DocumentController;
 use App\Http\Controllers\Api\V1\IssuerCertificateController;
 use App\Http\Controllers\Api\V1\IssuerController;
 use App\Http\Controllers\Api\V1\IssuerCredentialsController;
+use App\Http\Controllers\Api\V1\IssuerOnboardingController;
 use App\Http\Controllers\Api\V1\MeController;
 use App\Http\Controllers\Api\V1\ReferenceController;
 use App\Http\Controllers\Api\V1\TenantController;
+use App\Http\Controllers\Api\V1\TinController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/health', fn () => response()->json(['status' => 'ok']))->name('health');
@@ -36,9 +38,12 @@ Route::middleware('auth.api')->group(function () {
             Route::patch('/issuers/{issuer}', [IssuerController::class, 'update']);
             Route::put('/issuers/{issuer}/credentials', [IssuerCredentialsController::class, 'update']);
             Route::put('/issuers/{issuer}/certificate', [IssuerCertificateController::class, 'update']);
+            Route::post('/issuers/{issuer}/verify-tin', [IssuerOnboardingController::class, 'verifyTin']);
+            Route::post('/issuers/{issuer}/authorize', [IssuerOnboardingController::class, 'authorize']);
         });
 
         Route::middleware('ability:read')->group(function () {
+            Route::post('/tin/validate', [TinController::class, 'validate']);
             Route::get('/buyers', [BuyerController::class, 'index']);
             Route::get('/buyers/{buyer}', [BuyerController::class, 'show']);
         });
@@ -56,6 +61,7 @@ Route::middleware('auth.api')->group(function () {
             Route::post('/documents', [DocumentController::class, 'store'])->middleware('idempotency');
             Route::post('/documents/batch', [DocumentBatchController::class, 'store'])->middleware('idempotency');
             Route::post('/documents/{document}/submit', [DocumentController::class, 'submit']);
+            Route::post('/documents/{document}/cancel', [DocumentController::class, 'cancel']);
         });
     });
 });

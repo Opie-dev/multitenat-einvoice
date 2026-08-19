@@ -32,6 +32,17 @@ trait TenantAwareJob
     /** @return array<int, object> */
     public function middleware(): array
     {
+        return $this->tenantMiddleware();
+    }
+
+    /**
+     * Jobs that need middleware of their own compose it on top of this, so the
+     * tenant is always bound before anything else runs.
+     *
+     * @return array<int, object>
+     */
+    protected function tenantMiddleware(): array
+    {
         return [new BindTenantContext];
     }
 }

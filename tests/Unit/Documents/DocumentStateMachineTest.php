@@ -46,7 +46,7 @@ it('records an event, sets timestamps and held reason, and dispatches DocumentTr
     Event::fake([DocumentTransitioned::class]);
     $doc = Document::factory()->for($this->issuer)->create(['status' => 'draft']);
     $this->sm->transition($doc, DocumentStatus::Validated);
-    $this->sm->transition($doc, DocumentStatus::Held, HeldReason::IssuerNotActive->value);
+    $this->sm->transition($doc, DocumentStatus::Held, heldReason: HeldReason::IssuerNotActive);
     expect($doc->refresh()->status)->toBe(DocumentStatus::Held)
         ->and($doc->held_reason)->toBe(HeldReason::IssuerNotActive)
         ->and($doc->validated_at)->not->toBeNull()

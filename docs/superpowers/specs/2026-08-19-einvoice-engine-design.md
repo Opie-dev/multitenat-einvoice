@@ -109,20 +109,24 @@ Per-tenant `buyers` registry: `name`, `tin?`, `id_type/id_number?`, `sst_number?
 - `group_id?`: set by batch endpoint
 
 ### 5.2 Storage
-`documents` (tenant_id, issuer_id, group_id, type, status, buyer snapshot JSON, currency, totals, source_system, source_ref, lhdn_uuid, lhdn_long_id, lhdn_submission_uid, validated_at, submitted_at, lhdn_status_at, cancelled_at, cancel_reason, held_reason, consolidated_into_id, ubl_json (longtext), signed_payload_hash, pdf_path, metadata), `document_lines`, `document_events` (transition log), `submission_attempts` (request/response, http status, error codes, duration).
+`documents` (tenant_id, issuer_id, group_id, type, status, buyer snapshot JSON, currency, totals, source_system, source_ref, lhdn_internal_id, lhdn_uuid, lhdn_long_id, lhdn_submission_uid, validated_at, submitted_at, lhdn_status_at, cancelled_at, cancel_reason, held_reason, consolidated_into_id, ubl_json (longtext), signed_payload_hash, pdf_path, submission_attempts_count, last_submission_error, next_submission_at, metadata), `document_lines`, `document_events` (transition log), `submission_attempts` (request/response, http status, error codes, duration).
+
+`lhdn_internal_id`: set to the document id at creation; unique per tenant; sent to LHDN as `codeNumber`/`Invoice.ID` so the internal and LHDN-facing identifiers never diverge. `submission_attempts_count`, `last_submission_error` and `next_submission_at` track retry/backoff state for the submission pipeline (§6.3–6.4).
 
 Unique: `(tenant_id, environment, source_system, source_ref, type)` — a merchant may reuse the same `source.ref` in sandbox and production.
 
 ### 5.3 State machine
 ```
 draft --validate--> validated --queue--> queued --batch--> submitted --poll--> valid
-                        |                                                 \--> invalid
+                        |          \--reject at submission--> invalid          \--> invalid
                         \--hold--> held --release--> queued
+                                    held --re-hold--> held
 valid --cancel (<=72h)--> cancelled        valid --buyer rejects--> rejected
 consolidate=true documents: validated --> awaiting_consolidation --> consolidated
 ```
 - `held` reasons: `issuer_not_active`, `certificate_expired`, `lhdn_credentials_invalid`, `lhdn_unavailable`, `einvoice_not_required` (stays stored, never submitted).
-- Transitions implemented in `DocumentStateMachine` (pure PHP), throwing `InvalidTransition`. Every transition writes `document_events` and dispatches a Laravel event consumed by the webhook dispatcher.
+- `queued -> invalid` covers documents LHDN rejects at submission time (before a `submitted` state is ever reached); `held -> held` covers re-holding an already-held document under a new reason.
+- Transitions implemented in `DocumentStateMachine` (pure PHP), throwing `InvalidTransition`. `transition()` takes a typed `HeldReason` (required whenever `$to` is `held`); the reason string recorded on `document_events` defaults to that enum's value. Every transition writes `document_events` and dispatches a Laravel event consumed by the webhook dispatcher.
 - Cancellation window enforced against `lhdn_status_at` (validation time) + 72h; after that the API returns 409 with guidance to issue a credit/refund note.
 
 ### 5.4 Idempotency
@@ -138,24 +142,23 @@ Scheduled job (daily, acts on the previous month for issuers with `consolidation
 ## 6. LHDN gateway
 
 ### 6.1 Clients
-`LhdnClient` interface: `token(Issuer): AccessToken`, `submitDocuments(Issuer, SubmissionBatch): SubmissionResult`, `getSubmission(...)`, `getDocument(...)`, `cancelDocument(...)`, `validateTin(...)`, `searchTin(...)`.
-- `IntermediaryLhdnClient`: Billplz client credentials from config; token requested with `onbehalfof: <issuer TIN>`.
-- `OwnCredentialsLhdnClient`: issuer's encrypted credentials.
-- `FakeLhdnClient`: deterministic responses for tests, driven by fixture files.
+`LhdnClient` interface: `token(Issuer): AccessToken`, `submitDocuments(Issuer, SubmissionBatch): SubmissionResult`, `getSubmission(...)`, `getDocument(...)`, `cancelDocument(...)`, `validateTin(...)`.
+Implementations (amended 2026-08-20, Plan 3): `HttpLhdnClient` — one HTTP implementation that serves both modes (intermediary credentials from config with `onbehalfof: <issuer TIN>`, or the issuer's own encrypted credentials) as chosen by `CredentialsResolver`; and `FakeLhdnClient` — deterministic in-memory responses for tests, scripted per operation rather than from fixture files. `searchTin` is deferred (no caller yet).
 Resolution: `LhdnClientFactory::for(Issuer)` by `lhdn_mode` and `environment` (base URLs per environment in config).
 
 ### 6.2 Token cache
-Redis key `lhdn:token:{env}:{mode}:{issuer_id}` with TTL = expires_in - 60s. Single-flight lock to avoid stampedes.
+Redis key `lhdn:token:{env}:{mode}:{sha1(client_id|onbehalfof)}` (amended 2026-08-20, Plan 3: keyed by the credential set actually used, so two issuers sharing one intermediary credential share one token and the raw client id never lands in a cache key) with TTL = expires_in - 60s. Single-flight lock to avoid stampedes.
 
 ### 6.3 Submission pipeline
 Per document (queued job `PrepareDocument`): `BuildUbl` (UBL 2.1 JSON per LHDN SDK schema, version 1.1 signed) -> `HashDocument` (SHA-256 of canonical JSON) -> `SignDocument` (XAdES-style signature per LHDN signing spec using issuer cert; implemented in `Signer` with phpseclib/OpenSSL) -> status `queued`.
 `SubmissionBatcher` job (every 10s per issuer with queued docs, or when 100 reached / 5 MB): drains up to 100 documents / max 5 MB, one `submitDocuments` call, records `submission_attempts`, sets `submitted` + `lhdn_submission_uid`. Accepted/rejected documents in the response are handled individually.
 `SubmissionPoller` job: polls `getSubmission` with backoff (5s, 15s, 30s, 60s... up to 1h) until every document is `valid` or `invalid`; stores `lhdn_uuid`, `long_id`, validation errors.
+`documents.lhdn_internal_id` (the document's own ULID, §5.2) is sent to LHDN as `codeNumber` on `submitDocuments` and as `Invoice.ID` in the UBL payload — the engine's internal identifier and the LHDN-facing one are always the same value, deliberately, so retries and lookups never have to reconcile two IDs.
 
 ### 6.4 Rate limiting & resilience
-- Per-issuer/token limiter honouring LHDN documented limits (config-driven; e.g. submit max 100/min, token max 12/min). Jobs release back to the queue when the budget is exhausted.
-- Transient errors (429, 5xx, network) -> retry with exponential backoff, max 8 attempts, then `held` with reason `lhdn_unavailable` and an ops alert. Terminal errors (400 validation) -> `invalid` with mapped errors.
-- Circuit breaker per environment: after N consecutive 5xx, pause batching for 60s.
+- Per-issuer, per-operation limiter honouring LHDN documented limits (config-driven in `config/lhdn.php` under `rate_limits`; e.g. submit max 100/min, token max 12/min, keyed `lhdn:{operation}:{issuer_id}`). Jobs release back to the queue when the budget is exhausted.
+- Transient errors (429, 5xx, network) -> retry with exponential backoff (curve in `config/lhdn.php` under `submission.retry_backoff_seconds` for the submit loop, `poll.backoff_seconds` for polling), max 8 attempts, then `held` with reason `lhdn_unavailable` and an ops alert. Terminal errors (400 validation) -> `invalid` with mapped errors. Auth errors (401/403) -> `held` with reason `lhdn_credentials_invalid`, cached token dropped.
+- Circuit breaker **per environment** (not per issuer, since a MyInvois outage is platform-wide): after N consecutive failures (`circuit_breaker.failure_threshold`), pause every call in that environment for `circuit_breaker.cooldown_seconds`.
 
 ### 6.5 Cancellation & rejection
 `POST /v1/documents/{id}/cancel {reason}` -> LHDN cancel within 72h of validation -> `cancelled`. Buyer rejections detected by poller/notification -> `rejected`; issuer must cancel or ignore per LHDN rules.

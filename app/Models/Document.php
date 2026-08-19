@@ -46,6 +46,13 @@ use Illuminate\Support\Carbon;
  * @property array<string, mixed>|null $payment
  * @property array<string, mixed>|null $metadata
  * @property string $payload_hash
+ * @property string|null $lhdn_internal_id
+ * @property string|null $ubl_json
+ * @property string|null $signed_payload_hash
+ * @property string|null $pdf_path
+ * @property int $submission_attempts_count
+ * @property array<string, mixed>|null $last_submission_error
+ * @property Carbon|null $next_submission_at
  * @property string|null $lhdn_uuid
  * @property string|null $lhdn_long_id
  * @property string|null $lhdn_submission_uid
@@ -86,6 +93,9 @@ class Document extends Model
             'payment' => 'array',
             'metadata' => 'array',
             'lhdn_errors' => 'array',
+            'last_submission_error' => 'array',
+            'next_submission_at' => 'datetime',
+            'submission_attempts_count' => 'integer',
             'consolidate' => 'boolean',
             'issue_date' => 'date:Y-m-d',
             'subtotal' => 'decimal:2',

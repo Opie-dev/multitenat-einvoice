@@ -1,11 +1,13 @@
 <?php
 
 use App\Enums\Environment;
+use App\Jobs\PrepareDocument;
 use App\Models\AuditLog;
 use App\Models\Document;
 use App\Models\Issuer;
 use App\Models\Tenant;
 use App\Tenancy\TenantContext;
+use Illuminate\Support\Facades\Queue;
 
 function apiDocPayload(Issuer $issuer, array $overrides = []): array
 {
@@ -17,6 +19,9 @@ function apiDocPayload(Issuer $issuer, array $overrides = []): array
 }
 
 beforeEach(function () {
+    // The submission pipeline is covered end-to-end in tests/Feature/Lhdn/SubmissionPipelineTest;
+    // here the queued -> prepared handoff would otherwise hold these certificate-less issuers' documents.
+    Queue::fake([PrepareDocument::class]);
     $this->tenant = Tenant::factory()->create();
     $this->issuer = Issuer::factory()->for($this->tenant)->active()->create(); // sandbox
     $this->h = apiKeyHeaders($this->tenant, 'sandbox');
@@ -93,6 +98,13 @@ it('submits a validated document and reports 409 for wrong states', function () 
     $this->withHeaders($this->h)->postJson("/v1/documents/{$id}/submit")->assertOk()->assertJsonPath('data.status', 'queued');
     $this->withHeaders($this->h)->postJson("/v1/documents/{$id}/submit")->assertStatus(409)->assertJsonPath('code', 'invalid_transition');
     expect(AuditLog::where('action', 'document.submitted')->count())->toBe(1);
+});
+
+it('resubmits an invalid document instead of rejecting it with a 409', function () {
+    app(TenantContext::class)->bind($this->tenant, null, Environment::Sandbox);
+    $invalid = Document::factory()->for($this->issuer)->create(['status' => 'invalid', 'lhdn_errors' => [['code' => 'X', 'message' => 'y']]]);
+    app(TenantContext::class)->clear();
+    $this->withHeaders($this->h)->postJson("/v1/documents/{$invalid->id}/submit")->assertOk()->assertJsonPath('data.status', 'queued');
 });
 
 it('enforces abilities', function () {
