@@ -19,6 +19,10 @@ return Application::configure(basePath: dirname(__DIR__))
         commands: __DIR__.'/../routes/console.php',
         health: '/up',
     )
+    // Listeners are registered explicitly (App\Providers\AppServiceProvider::boot())
+    // for determinism; Laravel's automatic app/Listeners discovery is otherwise on
+    // by default and would double-register the same listener, firing it twice.
+    ->withEvents(discover: false)
     ->withMiddleware(function (Middleware $middleware): void {
         // spec 3.3: every /v1 request is throttled per credential (see the
         // 'api' limiter in App\Providers\AppServiceProvider).
