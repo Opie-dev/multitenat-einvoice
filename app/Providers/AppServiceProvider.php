@@ -5,6 +5,7 @@ namespace App\Providers;
 use App\Events\DocumentTransitioned;
 use App\Events\IssuerActivated;
 use App\Lhdn\Fake\FakeLhdnClient;
+use App\Lhdn\LhdnDriverGuard;
 use App\Listeners\PrepareDocumentOnQueued;
 use App\Listeners\ReleaseHeldDocumentsOnActivation;
 use App\Tenancy\TenantContext;
@@ -30,6 +31,8 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        LhdnDriverGuard::check($this->app);
+
         // spec 3.3: throttle per credential, not per IP, so one merchant's
         // traffic cannot exhaust another's budget behind a shared NAT. The
         // bearer token is hashed so it never reaches the cache store or logs.

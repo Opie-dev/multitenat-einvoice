@@ -94,3 +94,11 @@ it('is deterministic', function () {
     $doc = ublDoc($this->issuer);
     expect((new UblDocumentBuilder)->build($doc))->toBe((new UblDocumentBuilder)->build($doc->fresh()->load('lines', 'issuer')));
 });
+
+it('emits NA for a supplier without contact details, like the buyer path', function () {
+    $this->issuer->forceFill(['phone' => '', 'email' => ''])->save();
+    $ubl = app(UblDocumentBuilder::class)->build(ublDoc($this->issuer->refresh()));
+
+    $contact = $ubl['Invoice'][0]['AccountingSupplierParty'][0]['Party'][0]['Contact'][0];
+    expect($contact['Telephone'][0]['_'])->toBe('NA')->and($contact['ElectronicMail'][0]['_'])->toBe('NA');
+});

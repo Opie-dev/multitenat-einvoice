@@ -25,7 +25,9 @@ final class UblParty
             'PartyIdentification' => $ids,
             'PostalAddress' => [self::address($issuer->city, $issuer->postcode, $issuer->state_code, array_values(array_filter([$issuer->address_line1, $issuer->address_line2, $issuer->address_line3], fn ($l) => $l !== null && $l !== '')), $issuer->country_code)],
             'PartyLegalEntity' => [['RegistrationName' => [['_' => $issuer->name]]]],
-            'Contact' => [['Telephone' => [['_' => $issuer->phone]], 'ElectronicMail' => [['_' => $issuer->email]]]],
+            // LHDN requires both contact fields; 'NA' is the documented placeholder,
+            // matching what the buyer path already emits for a missing phone.
+            'Contact' => [['Telephone' => [['_' => self::orNa($issuer->phone)]], 'ElectronicMail' => [['_' => self::orNa($issuer->email)]]]],
         ]]];
     }
 
@@ -58,6 +60,11 @@ final class UblParty
             'PartyLegalEntity' => [['RegistrationName' => [['_' => (string) ($snapshot['name'] ?? 'General Public')]]]],
             'Contact' => [$contact],
         ]]];
+    }
+
+    private static function orNa(?string $value): string
+    {
+        return $value === null || $value === '' ? 'NA' : $value;
     }
 
     /**

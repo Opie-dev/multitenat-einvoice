@@ -24,8 +24,10 @@ return new class extends Migration
             $table->unsignedInteger('duration_ms')->default(0);
             $table->timestamp('created_at');
             $table->index(['tenant_id', 'issuer_id', 'created_at']);
-            $table->index('document_id');
+            // No index('document_id'): the foreign key already indexes that column.
             $table->index('submission_uid');
+            // Retention/pruning sweeps scan by age across every tenant.
+            $table->index('created_at');
         });
     }
 

@@ -55,3 +55,14 @@ it('resubmits an invalid document via POST /submit', function () {
     $this->withHeaders($this->h)->postJson("/v1/documents/{$invalid->id}/submit")->assertOk()->assertJsonPath('data.status', 'queued');
     Queue::assertPushed(PrepareDocument::class);
 });
+
+it('refuses to cancel a document that has no LHDN uuid', function () {
+    app(TenantContext::class)->bind($this->tenant, null, Environment::Sandbox);
+    $orphan = Document::factory()->for($this->issuer)->valid()->create(['lhdn_uuid' => null, 'lhdn_status_at' => now()]);
+    app(TenantContext::class)->clear();
+
+    $this->withHeaders($this->h)->postJson("/v1/documents/{$orphan->id}/cancel", ['reason' => 'x'])
+        ->assertStatus(409)->assertJsonPath('code', 'lhdn_uuid_missing');
+    expect(collect(fakeLhdn()->calls())->pluck('operation'))->not->toContain('cancel')
+        ->and($orphan->refresh()->status)->toBe(DocumentStatus::Valid);
+});

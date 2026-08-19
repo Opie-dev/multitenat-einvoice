@@ -295,3 +295,34 @@ it('retries rather than invalidating when a submission fails with a non-payload 
         ->and($doc->last_submission_error['kind'])->toBe('terminal');
     Queue::assertPushed(SubmitDocuments::class);
 });
+
+it('gives up on a document it can never prepare instead of retrying forever', function () {
+    config(['lhdn.submission.max_attempts' => 2]);
+    Queue::fake([PrepareDocument::class, SubmitDocuments::class]);
+    $doc = pipelineDoc($this->issuer);
+    expect($doc->refresh()->status)->toBe(DocumentStatus::Queued);
+
+    app()->bind(UblDocumentBuilder::class, fn () => new class extends UblDocumentBuilder
+    {
+        /** @return array<string, mixed> */
+        public function build(Document $document): array
+        {
+            throw new RuntimeException('boom');
+        }
+    });
+    $run = fn () => (new PrepareDocument($doc->id))->handle(app(UblDocumentBuilder::class), app(DocumentSigner::class), app(DocumentStateMachine::class));
+
+    // Under the budget the job rethrows so the queue worker retries it.
+    expect($run)->toThrow(RuntimeException::class, 'boom');
+    expect($doc->refresh()->status)->toBe(DocumentStatus::Queued)
+        ->and($doc->submission_attempts_count)->toBe(1)
+        ->and($doc->last_submission_error['kind'])->toBe('prepare')
+        ->and($doc->last_submission_error['message'])->toBe('boom')
+        ->and($doc->lhdn_errors)->toBeNull();
+
+    $run();
+    expect($doc->refresh()->status)->toBe(DocumentStatus::Held)
+        ->and($doc->held_reason)->toBe(HeldReason::LhdnUnavailable)
+        ->and($doc->submission_attempts_count)->toBe(2)
+        ->and($doc->events()->get()->last()->reason)->toBe('prepare_failed');
+});

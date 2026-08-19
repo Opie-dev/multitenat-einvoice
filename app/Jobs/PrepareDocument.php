@@ -57,8 +57,27 @@ class PrepareDocument implements ShouldQueue
         try {
             $signed = $signer->sign($builder->build($document), SigningMaterial::fromSecret($issuer->secret));
         } catch (LhdnException $e) {
+            // Signing only ever fails over the issuer's key material, so the hold reason
+            // stays certificate_expired; the specific cause (missing cert, key mismatch,
+            // unreadable PEM) is preserved verbatim in last_submission_error.
             $document->forceFill(['last_submission_error' => SubmissionErrors::summary($e)])->save();
             $stateMachine->transition($document, DocumentStatus::Held, heldReason: HeldReason::CertificateExpired);
+
+            return;
+        } catch (\Throwable $e) {
+            // Anything else (a builder bug, an OpenSSL failure, an encoding blow-up) is
+            // not the merchant's fault, so the document is never marked invalid. Count
+            // the attempt and rethrow so the queue retries; once the budget is spent,
+            // park it in held so a human sees it instead of retrying forever.
+            $attempts = $document->submission_attempts_count + 1;
+            $document->forceFill([
+                'submission_attempts_count' => $attempts,
+                'last_submission_error' => ['kind' => 'prepare', 'message' => mb_substr($e->getMessage(), 0, 500), 'at' => now()->toIso8601String()],
+            ])->save();
+            if ($attempts < (int) config('lhdn.submission.max_attempts', 8)) {
+                throw $e;
+            }
+            $stateMachine->transition($document, DocumentStatus::Held, 'prepare_failed', heldReason: HeldReason::LhdnUnavailable);
 
             return;
         }

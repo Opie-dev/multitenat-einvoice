@@ -22,8 +22,13 @@ class CancelDocument
         if (! $document->isCancellable()) {
             throw new CancellationWindowClosed;
         }
+        if ($document->lhdn_uuid === null || $document->lhdn_uuid === '') {
+            // A valid document without a UUID means our own state drifted from LHDN's;
+            // sending an empty uuid would cancel nothing (or something else) silently.
+            throw ProblemException::conflict('Document has no LHDN UUID to cancel.', 'lhdn_uuid_missing');
+        }
         $issuer = $document->issuer;
-        $this->clients->for($issuer)->cancelDocument($issuer, (string) $document->lhdn_uuid, $reason);
+        $this->clients->for($issuer)->cancelDocument($issuer, $document->lhdn_uuid, $reason);
         $this->sm->transition($document, DocumentStatus::Cancelled, $reason);
         $this->audit->record('document.cancelled', $document, ['reason' => $reason]);
 

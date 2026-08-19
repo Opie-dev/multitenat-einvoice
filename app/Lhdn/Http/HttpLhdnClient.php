@@ -94,6 +94,11 @@ class HttpLhdnClient implements LhdnClient
 
     public function validateTin(Environment $environment, string $tin, string $idType, string $idValue, ?Issuer $issuer = null): bool
     {
+        // A client is built for exactly one environment; asking it to validate against
+        // the other one would silently use the wrong base URL and credentials.
+        if ($environment !== $this->environment) {
+            throw new \InvalidArgumentException("HttpLhdnClient is bound to {$this->environment->value}; it cannot validate a TIN in {$environment->value}.");
+        }
         $issuerForRecord = $issuer ?? throw new \InvalidArgumentException('HttpLhdnClient::validateTin requires an issuer for attempt recording; use the intermediary client with a system issuer or pass the acting issuer.');
         try {
             $this->call($issuerForRecord, 'validate_tin', null, null, ['tin' => $tin, 'id_type' => $idType], fn (PendingRequest $http) => $http->get("/api/v1.0/taxpayer/validate/{$tin}", ['idType' => $idType, 'idValue' => $idValue]));
