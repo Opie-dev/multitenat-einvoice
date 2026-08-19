@@ -29,3 +29,15 @@ it('records issuer updates with a diff but never secret values', function () {
     $cred = AuditLog::where('action', 'issuer.credentials_updated')->first();
     expect(json_encode($cred->toArray()))->not->toContain('topsecret');
 });
+
+it('bounds the caller-supplied request id to the column width', function () {
+    $tenant = Tenant::factory()->create();
+    $long = str_repeat('r', 120);
+    $this->withHeaders(serviceHeaders($tenant) + ['X-Request-Id' => $long])
+        ->postJson('/v1/api-keys', ['name' => 'k', 'environment' => 'sandbox', 'abilities' => ['read']])
+        ->assertCreated();
+
+    $log = AuditLog::where('action', 'api_key.created')->firstOrFail();
+    expect(mb_strlen((string) $log->request_id))->toBe(64)
+        ->and($log->request_id)->toBe(substr($long, 0, 64));
+});

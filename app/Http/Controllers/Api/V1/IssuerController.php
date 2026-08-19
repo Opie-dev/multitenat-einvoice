@@ -11,6 +11,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Issuer;
 use App\Services\Audit\AuditLogger;
 use App\Tenancy\TenantContext;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Spatie\LaravelData\CursorPaginatedDataCollection;
 
 class IssuerController extends Controller
@@ -29,10 +30,17 @@ class IssuerController extends Controller
         if (Issuer::forCurrentEnvironment()->where('tin', $data->tin)->exists()) {
             throw ProblemException::conflict('An issuer with this TIN already exists in this environment.', 'issuer_exists');
         }
-        $issuer = Issuer::create($data->toArray() + [
-            'environment' => $context->environment(),
-            'status' => IssuerStatus::Draft,
-        ]);
+        try {
+            // The pre-check above is a courtesy; the (tenant_id, tin,
+            // environment) unique index is what actually settles a race
+            // between two concurrent creates.
+            $issuer = Issuer::create($data->toArray() + [
+                'environment' => $context->environment(),
+                'status' => IssuerStatus::Draft,
+            ]);
+        } catch (UniqueConstraintViolationException) {
+            throw ProblemException::conflict('An issuer with this TIN already exists in this environment.', 'issuer_exists');
+        }
 
         $audit->record('issuer.created', $issuer);
 

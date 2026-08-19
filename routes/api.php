@@ -14,7 +14,7 @@ Route::get('/health', fn () => response()->json(['status' => 'ok']))->name('heal
 
 Route::middleware('auth.api')->group(function () {
     Route::post('/tenants', [TenantController::class, 'store'])->middleware('ability:tenants:manage');
-    Route::get('/reference/{set}', [ReferenceController::class, 'show']);
+    Route::get('/reference/{set}', [ReferenceController::class, 'show'])->middleware('ability:read');
 
     Route::middleware('tenant')->group(function () {
         Route::get('/me', MeController::class);

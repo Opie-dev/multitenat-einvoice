@@ -34,3 +34,12 @@ it('returns 404 for unknown sets', function () {
     $tenant = Tenant::factory()->create();
     $this->withHeaders(apiKeyHeaders($tenant))->getJson('/v1/reference/nope')->assertStatus(404);
 });
+
+it('requires the read ability', function () {
+    Artisan::call('einvoice:refresh-reference-data');
+    $tenant = Tenant::factory()->create();
+    $this->withHeaders(apiKeyHeaders($tenant, 'sandbox', ['webhooks:manage']))
+        ->getJson('/v1/reference/state_codes')
+        ->assertStatus(403)
+        ->assertJsonPath('code', 'forbidden');
+});

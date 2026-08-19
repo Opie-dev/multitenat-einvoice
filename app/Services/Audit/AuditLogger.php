@@ -22,13 +22,15 @@ class AuditLogger
             'tenant_id' => $this->context->tenantOrNull()?->getKey(),
             'actor_type' => $actor?->type,
             'actor_id' => $actor?->id,
-            'actor_name' => $actor?->name,
+            'actor_name' => $actor === null ? null : mb_substr($actor->name, 0, 100),
             'action' => $action,
             'subject_type' => $subject ? $subject::class : null,
             'subject_id' => $subject?->getKey(),
             'changes' => $changes,
             'ip' => $this->request->ip(),
-            'request_id' => $this->request->header('X-Request-Id') ?? (string) Str::ulid(),
+            // Caller-supplied; bound to the column width so a hostile header
+            // cannot overflow the insert.
+            'request_id' => mb_substr((string) ($this->request->header('X-Request-Id') ?? Str::ulid()), 0, 64),
             'created_at' => now(),
         ]);
     }

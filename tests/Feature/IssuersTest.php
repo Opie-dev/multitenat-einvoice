@@ -3,6 +3,7 @@
 use App\Enums\Environment;
 use App\Models\Issuer;
 use App\Models\Tenant;
+use Illuminate\Database\UniqueConstraintViolationException;
 
 function issuerPayload(array $overrides = []): array
 {
@@ -87,4 +88,16 @@ it('requires issuers:manage for writes', function () {
     $tenant = Tenant::factory()->create();
     $this->withHeaders(apiKeyHeaders($tenant, 'sandbox', ['read']))
         ->postJson('/v1/issuers', issuerPayload())->assertStatus(403);
+});
+
+it('enforces the duplicate tin rule in the database, not just the pre-check', function () {
+    $tenant = Tenant::factory()->create();
+    $issuer = Issuer::factory()->for($tenant)->create(['environment' => Environment::Sandbox, 'tin' => 'C99999999999']);
+
+    // The controller's pre-check can lose a race; this proves the unique index
+    // behind the 409 actually exists, so the caught violation is reachable.
+    expect(fn () => Issuer::factory()->for($tenant)->create([
+        'environment' => $issuer->environment,
+        'tin' => $issuer->tin,
+    ]))->toThrow(UniqueConstraintViolationException::class);
 });
