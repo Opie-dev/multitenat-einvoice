@@ -3,6 +3,7 @@
 use App\Lhdn\LhdnException;
 use App\Lhdn\Signing\DocumentSigner;
 use App\Lhdn\Signing\SigningMaterial;
+use Brick\Math\BigInteger;
 use Carbon\CarbonImmutable;
 
 $fx = fn (string $f) => (string) file_get_contents(base_path("tests/Fixtures/certs/{$f}"));
@@ -23,6 +24,14 @@ it('signs a UBL document and the signature verifies against the certificate', fu
     $certDer = base64_decode(preg_replace('/-----[^-]+-----|\s+/', '', $fx('test-cert.pem')) ?? '', true);
     expect($sig['KeyInfo'][0]['X509Data'][0]['X509Certificate'][0]['_'])->toBe(base64_encode((string) $certDer));
     expect($signer->verify($signed->document, $fx('test-cert.pem')))->toBeTrue();
+
+    $certParsed = openssl_x509_parse((string) $fx('test-cert.pem'));
+    $expectedSerial = BigInteger::fromBase((string) $certParsed['serialNumberHex'], 16)->toBase(10);
+    $issuerSerialFromProps = $sig['Object'][0]['QualifyingProperties'][0]['SignedProperties'][0]['SignedSignatureProperties'][0]['SigningCertificate'][0]['Cert'][0]['IssuerSerial'][0]['X509SerialNumber'][0]['_'];
+    $issuerSerialFromKeyInfo = $sig['KeyInfo'][0]['X509Data'][0]['X509IssuerSerial'][0]['X509SerialNumber'][0]['_'];
+    expect(ctype_digit($issuerSerialFromKeyInfo))->toBeTrue()
+        ->and($issuerSerialFromKeyInfo)->toBe($issuerSerialFromProps)
+        ->and($issuerSerialFromKeyInfo)->toBe($expectedSerial);
 });
 
 it('detects tampering and rejects mismatched material', function () use ($fx) {

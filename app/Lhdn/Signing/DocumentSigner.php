@@ -3,13 +3,14 @@
 namespace App\Lhdn\Signing;
 
 use App\Lhdn\LhdnException;
+use Brick\Math\BigInteger;
 use Carbon\CarbonImmutable;
 
 class DocumentSigner
 {
     public const JSON_FLAGS = JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRESERVE_ZERO_FRACTION;
 
-    private const SHA256 = 'http://www.w3.org/2001/04/xmlenc#sha256';
+    private const SHA256_URI = 'http://www.w3.org/2001/04/xmlenc#sha256';
 
     /** @param array<string, mixed> $ubl */
     public function sign(array $ubl, SigningMaterial $material, ?CarbonImmutable $signingTime = null): SignedDocument
@@ -45,7 +46,7 @@ class DocumentSigner
         $subjectParts = (array) ($parsed['subject'] ?? []);
         $issuerName = self::dn($issuerParts);
         $subjectName = self::dn($subjectParts);
-        $serial = (string) ($parsed['serialNumber'] ?? '');
+        $serial = self::serialDecimal($parsed);
         $time = ($signingTime ?? CarbonImmutable::now())->utc()->format('Y-m-d\TH:i:s\Z');
 
         $signedProps = [[
@@ -53,7 +54,7 @@ class DocumentSigner
             'SignedSignatureProperties' => [[
                 'SigningTime' => [['_' => $time]],
                 'SigningCertificate' => [['Cert' => [[
-                    'CertDigest' => [['DigestMethod' => [['_' => '', 'Algorithm' => self::SHA256]], 'DigestValue' => [['_' => $certDigest]]]],
+                    'CertDigest' => [['DigestMethod' => [['_' => '', 'Algorithm' => self::SHA256_URI]], 'DigestValue' => [['_' => $certDigest]]]],
                     'IssuerSerial' => [['X509IssuerName' => [['_' => $issuerName]], 'X509SerialNumber' => [['_' => $serial]]]],
                 ]]]],
             ]],
@@ -73,8 +74,8 @@ class DocumentSigner
             'SignedInfo' => [[
                 'SignatureMethod' => [['_' => '', 'Algorithm' => 'http://www.w3.org/2001/04/xmldsig-more#rsa-sha256']],
                 'Reference' => [
-                    ['Type' => 'http://uri.etsi.org/01903/v1.3.2#SignedProperties', 'URI' => '#id-xades-signed-props', 'DigestMethod' => [['_' => '', 'Algorithm' => self::SHA256]], 'DigestValue' => [['_' => $propsDigest]]],
-                    ['Type' => '', 'URI' => '', 'DigestMethod' => [['_' => '', 'Algorithm' => self::SHA256]], 'DigestValue' => [['_' => $docDigest]]],
+                    ['Type' => 'http://uri.etsi.org/01903/v1.3.2#SignedProperties', 'URI' => '#id-xades-signed-props', 'DigestMethod' => [['_' => '', 'Algorithm' => self::SHA256_URI]], 'DigestValue' => [['_' => $propsDigest]]],
+                    ['Type' => '', 'URI' => '', 'DigestMethod' => [['_' => '', 'Algorithm' => self::SHA256_URI]], 'DigestValue' => [['_' => $docDigest]]],
                 ],
             ]],
         ];
@@ -142,6 +143,30 @@ class DocumentSigner
         }
 
         return $der;
+    }
+
+    /**
+     * XAdES `X509SerialNumber` is `xsd:integer` (decimal). `openssl_x509_parse()['serialNumber']`
+     * is a `0x…` hex string once the serial no longer fits a PHP int (true for our test cert and
+     * for real CA-issued certs), so derive the decimal from `serialNumberHex` via brick/math.
+     *
+     * @param  array<string, mixed>  $parsed
+     */
+    private static function serialDecimal(array $parsed): string
+    {
+        $hex = $parsed['serialNumberHex'] ?? null;
+        if (is_string($hex) && $hex !== '') {
+            $hex = preg_replace('/^0x/i', '', $hex) ?? $hex;
+
+            return BigInteger::fromBase($hex, 16)->toBase(10);
+        }
+
+        $serial = (string) ($parsed['serialNumber'] ?? '');
+        if (ctype_digit($serial)) {
+            return $serial;
+        }
+
+        throw LhdnException::auth('Certificate serial number could not be parsed.');
     }
 
     /** @param array<string, mixed> $parts */
