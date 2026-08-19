@@ -1,0 +1,46 @@
+<?php
+
+use App\Enums\Environment;
+use App\Models\ApiKey;
+use App\Models\Buyer;
+use App\Models\Issuer;
+use App\Models\Tenant;
+
+/**
+ * Every tenant-owned resource route must 404 for a different tenant.
+ * When you add a tenant-scoped resource route in a later plan, add a row here.
+ */
+dataset('cross_tenant_routes', function () {
+    return [
+        'issuer show' => [fn (Tenant $t) => Issuer::factory()->for($t)->create(['environment' => Environment::Sandbox]), 'GET', '/v1/issuers/{id}'],
+        'issuer update' => [fn (Tenant $t) => Issuer::factory()->for($t)->create(['environment' => Environment::Sandbox]), 'PATCH', '/v1/issuers/{id}'],
+        'issuer credentials' => [fn (Tenant $t) => Issuer::factory()->for($t)->create(['environment' => Environment::Sandbox, 'lhdn_mode' => 'own_credentials']), 'PUT', '/v1/issuers/{id}/credentials'],
+        'issuer certificate' => [fn (Tenant $t) => Issuer::factory()->for($t)->create(['environment' => Environment::Sandbox]), 'PUT', '/v1/issuers/{id}/certificate'],
+        'buyer show' => [fn (Tenant $t) => Buyer::factory()->for($t)->create(), 'GET', '/v1/buyers/{id}'],
+        'buyer update' => [fn (Tenant $t) => Buyer::factory()->for($t)->create(), 'PATCH', '/v1/buyers/{id}'],
+        'api key revoke' => [fn (Tenant $t) => ApiKey::generate($t, 'k', Environment::Sandbox, ['read'])['key'], 'DELETE', '/v1/api-keys/{id}'],
+    ];
+});
+
+it('returns 404 for cross-tenant access', function (Closure $make, string $method, string $path) {
+    $owner = Tenant::factory()->create();
+    $intruder = Tenant::factory()->create();
+    $resource = $make($owner);
+    $url = str_replace('{id}', $resource->getKey(), $path);
+
+    $this->withHeaders(serviceHeaders($intruder, 'sandbox'))
+        ->json($method, $url, ['name' => 'x', 'client_id' => 'a', 'client_secret' => 'b', 'format' => 'pem', 'certificate' => 'x', 'private_key' => 'y'])
+        ->assertStatus(404);
+})->with('cross_tenant_routes');
+
+it('lists are empty for another tenant', function () {
+    $owner = Tenant::factory()->create();
+    $intruder = Tenant::factory()->create();
+    Issuer::factory()->for($owner)->create(['environment' => Environment::Sandbox]);
+    Buyer::factory()->for($owner)->create();
+    ApiKey::generate($owner, 'k', Environment::Sandbox, ['read']);
+
+    foreach (['/v1/issuers', '/v1/buyers', '/v1/api-keys'] as $path) {
+        $this->withHeaders(serviceHeaders($intruder, 'sandbox'))->getJson($path)->assertOk()->assertJsonCount(0, 'data');
+    }
+});
