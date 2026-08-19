@@ -45,7 +45,7 @@ class TotalsCalculator
         $price = Money::of($line->unit_price);
         $gross = Money::round2($qty->multipliedBy($price));
 
-        $discount = BigDecimal::zero();
+        $discount = Money::round2(BigDecimal::zero());
         if ($line->discount_amount !== null) {
             $discount = Money::round2(Money::of($line->discount_amount));
         } elseif ($line->discount_rate !== null) {
@@ -57,7 +57,7 @@ class TotalsCalculator
         }
 
         $rate = $line->tax_rate !== null ? Money::of($line->tax_rate) : null;
-        $computedTax = $rate !== null ? Money::round2($sub->multipliedBy($rate)->dividedBy(100, 6, RoundingMode::HALF_UP)) : BigDecimal::zero();
+        $computedTax = $rate !== null ? Money::round2($sub->multipliedBy($rate)->dividedBy(100, 6, RoundingMode::HALF_UP)) : Money::round2(BigDecimal::zero());
         $tax = $computedTax;
         if ($line->tax_amount !== null) {
             $given = Money::round2(Money::of($line->tax_amount));

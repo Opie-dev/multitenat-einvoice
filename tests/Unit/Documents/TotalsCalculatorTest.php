@@ -4,6 +4,7 @@ use App\Data\Requests\Documents\DocumentLineData;
 use App\Data\Requests\Documents\DocumentTotalsInputData;
 use App\Domain\Documents\TotalsCalculator;
 use App\Domain\Documents\TotalsMismatch;
+use Illuminate\Validation\ValidationException;
 
 function line(array $o = []): DocumentLineData
 {
@@ -51,4 +52,12 @@ it('validates document-level total_payable', function () {
         ->toThrow(TotalsMismatch::class);
     $ok = (new TotalsCalculator)->calculate([line()], new DocumentTotalsInputData(total_payable: '10.00'));
     expect($ok->toStrings()['total_payable'])->toBe('10.00');
+});
+
+it('validates DocumentTotalsInputData statically via validateAndCreate', function () {
+    $ok = DocumentTotalsInputData::validateAndCreate(['total_payable' => '21.00']);
+    expect($ok->total_payable)->toBe('21.00');
+
+    expect(fn () => DocumentTotalsInputData::validateAndCreate(['total_payable' => 'abc']))
+        ->toThrow(ValidationException::class);
 });
