@@ -1,0 +1,15 @@
+services:
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: einvoice
+      MYSQL_USER: einvoice
+      MYSQL_PASSWORD: secret
+    ports: ["3306:3306"]
+    volumes: ["mysql-data:/var/lib/mysql"]
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+volumes:
+  mysql-data:
