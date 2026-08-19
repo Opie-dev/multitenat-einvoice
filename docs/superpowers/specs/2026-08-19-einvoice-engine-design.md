@@ -237,7 +237,7 @@ Laravel 12 · PHP 8.3 · MySQL 8 · Redis · Horizon · Pest · spatie/laravel-d
 
 ## 13. Follow-up projects (out of scope here)
 1. `billplz/einvoice-sdk` PHP package (thin client + Laravel service provider).
-2. Onboarding dashboard (UI/UX) — self-service merchant onboarding wizard (issuer profile, TIN verification, LHDN access mode, consent/credentials, certificate upload, sandbox test, go-live), marketplace vendor onboarding, API keys, document browser, webhooks. Planned as Plan 5 in the roadmap; needs its own design pass (hosting inside the engine vs. the Billplz dashboard, framework, flows).
+2. Onboarding dashboard (UI/UX) — self-service merchant onboarding wizard (issuer profile, TIN verification, LHDN access mode, consent/credentials, certificate upload, sandbox test, go-live), marketplace vendor onboarding, API keys, document browser, webhooks. Planned as Plan 5 in the roadmap. Front end: Inertia.js + React served by the engine app (user decision). Needs its own design pass (Billplz account SSO, flows, design system).
 3. Catalog integration (store seller-mode setting, order -> batch mapping).
 4. Recurring integration (cycle -> invoice; consolidation defaults).
 5. Affiliates integration (payout -> self-billed invoice).
