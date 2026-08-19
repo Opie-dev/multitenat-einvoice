@@ -8,6 +8,7 @@ use App\Exceptions\ProblemException;
 use App\Http\Controllers\Controller;
 use App\Models\Issuer;
 use App\Models\IssuerSecretHistory;
+use App\Services\Audit\AuditLogger;
 use App\Services\Certificates\CertificateParser;
 use App\Services\Certificates\InvalidCertificate;
 use App\Services\Issuers\IssuerActivator;
@@ -20,6 +21,7 @@ class IssuerCertificateController extends Controller
         Issuer $issuer,
         CertificateParser $parser,
         IssuerActivator $activator,
+        AuditLogger $audit,
     ): IssuerData {
         try {
             $info = $data->format === 'pem'
@@ -53,6 +55,8 @@ class IssuerCertificateController extends Controller
         });
 
         $activator->apply($issuer);
+
+        $audit->record('issuer.certificate_updated', $issuer, ['fingerprint' => $info->fingerprint]);
 
         return IssuerData::fromModel($issuer->refresh()->load('secret'))->wrap('data');
     }

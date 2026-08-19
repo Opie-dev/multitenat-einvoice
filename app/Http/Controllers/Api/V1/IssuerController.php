@@ -9,6 +9,7 @@ use App\Enums\IssuerStatus;
 use App\Exceptions\ProblemException;
 use App\Http\Controllers\Controller;
 use App\Models\Issuer;
+use App\Services\Audit\AuditLogger;
 use App\Tenancy\TenantContext;
 use Spatie\LaravelData\CursorPaginatedDataCollection;
 
@@ -23,7 +24,7 @@ class IssuerController extends Controller
         );
     }
 
-    public function store(CreateIssuerData $data, TenantContext $context): IssuerData
+    public function store(CreateIssuerData $data, TenantContext $context, AuditLogger $audit): IssuerData
     {
         if (Issuer::forCurrentEnvironment()->where('tin', $data->tin)->exists()) {
             throw ProblemException::conflict('An issuer with this TIN already exists in this environment.', 'issuer_exists');
@@ -33,6 +34,8 @@ class IssuerController extends Controller
             'status' => IssuerStatus::Draft,
         ]);
 
+        $audit->record('issuer.created', $issuer);
+
         return IssuerData::fromModel($issuer)->wrap('data');
     }
 
@@ -41,9 +44,16 @@ class IssuerController extends Controller
         return IssuerData::fromModel($issuer->load('secret'))->wrap('data');
     }
 
-    public function update(UpdateIssuerData $data, Issuer $issuer): IssuerData
+    public function update(UpdateIssuerData $data, Issuer $issuer, AuditLogger $audit): IssuerData
     {
+        // Captured before update(): Model::save() syncs the original attributes
+        // to the new values before update() returns, so getOriginal() must be
+        // snapshotted here to recover the pre-update "from" values for the diff.
+        $original = $issuer->getOriginal();
+
         $issuer->update($data->toArray());
+
+        $audit->record('issuer.updated', $issuer, AuditLogger::diff($issuer, $original));
 
         return IssuerData::fromModel($issuer->refresh()->load('secret'))->wrap('data');
     }
