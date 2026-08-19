@@ -6,6 +6,7 @@ use App\Data\Requests\CreateApiKeyData;
 use App\Data\Resources\ApiKeyData;
 use App\Http\Controllers\Controller;
 use App\Models\ApiKey;
+use App\Services\Audit\AuditLogger;
 use App\Tenancy\TenantContext;
 use Illuminate\Http\Response;
 use Spatie\LaravelData\CursorPaginatedDataCollection;
@@ -18,7 +19,7 @@ class ApiKeyController extends Controller
         return ApiKeyData::collect(ApiKey::whereNull('revoked_at')->orderByDesc('created_at')->orderByDesc('id')->cursorPaginate(50), CursorPaginatedDataCollection::class);
     }
 
-    public function store(CreateApiKeyData $data, TenantContext $context): ApiKeyData
+    public function store(CreateApiKeyData $data, TenantContext $context, AuditLogger $audit): ApiKeyData
     {
         ['key' => $key, 'plaintext' => $plaintext] = ApiKey::generate(
             $context->tenant(),
@@ -27,12 +28,20 @@ class ApiKeyController extends Controller
             $data->abilities,
         );
 
+        $audit->record('api_key.created', $key, [
+            'name' => $key->name,
+            'environment' => $key->environment->value,
+            'abilities' => $key->abilities,
+        ]);
+
         return ApiKeyData::fromModel($key)->withPlaintext($plaintext)->wrap('data');
     }
 
-    public function destroy(ApiKey $apiKey): Response
+    public function destroy(ApiKey $apiKey, AuditLogger $audit): Response
     {
         $apiKey->update(['revoked_at' => now()]);
+
+        $audit->record('api_key.revoked', $apiKey);
 
         return response()->noContent();
     }

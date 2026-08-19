@@ -8,10 +8,11 @@ use App\Enums\LhdnMode;
 use App\Exceptions\ProblemException;
 use App\Http\Controllers\Controller;
 use App\Models\Issuer;
+use App\Services\Audit\AuditLogger;
 
 class IssuerCredentialsController extends Controller
 {
-    public function update(PutIssuerCredentialsData $data, Issuer $issuer): IssuerData
+    public function update(PutIssuerCredentialsData $data, Issuer $issuer, AuditLogger $audit): IssuerData
     {
         if ($issuer->lhdn_mode !== LhdnMode::OwnCredentials) {
             throw ProblemException::conflict('Credentials only apply to issuers in own_credentials mode.', 'credentials_not_applicable');
@@ -23,6 +24,8 @@ class IssuerCredentialsController extends Controller
             'credentials_verified_at' => null,
         ]);
         $secret->save();
+
+        $audit->record('issuer.credentials_updated', $issuer);
 
         return IssuerData::fromModel($issuer->refresh()->load('secret'))->wrap('data');
     }
