@@ -107,3 +107,27 @@ it('refuses calls while the breaker is open and respects the per-issuer rate bud
     $this->client->validateTin(Environment::Sandbox, 'C1', 'BRN', '1', $this->issuer);
     expect(fn () => $this->client->validateTin(Environment::Sandbox, 'C1', 'BRN', '1', $this->issuer))->toThrow(fn (LhdnException $e) => expect($e->httpStatus)->toBe(429));
 });
+
+it('does not double-count a token fetch failure as a second attempt or breaker failure', function () {
+    config(['lhdn.circuit_breaker' => ['failure_threshold' => 2, 'cooldown_seconds' => 60]]);
+    Http::fake(['https://lhdn.test/connect/token' => Http::response(['error' => 'down'], 503)]);
+
+    expect(fn () => $this->client->getSubmission($this->issuer, 'X'))->toThrow(fn (LhdnException $e) => expect($e->kind)->toBe(LhdnErrorKind::Transient));
+    expect(SubmissionAttempt::count())->toBe(1);
+    $attempt = SubmissionAttempt::sole();
+    expect($attempt->operation)->toBe('token')->and($attempt->error_kind)->toBe('transient');
+    expect(app(CircuitBreaker::class)->isOpen(Environment::Sandbox))->toBeFalse();
+
+    expect(fn () => $this->client->getSubmission($this->issuer, 'X'))->toThrow(LhdnException::class);
+    expect(SubmissionAttempt::count())->toBe(2);
+    expect(app(CircuitBreaker::class)->isOpen(Environment::Sandbox))->toBeTrue();
+});
+
+it('classifies an array error body without a message key by json-encoding it', function () {
+    Http::fake([
+        'https://lhdn.test/connect/token' => Http::response(['access_token' => 'abc', 'expires_in' => 3600]),
+        'https://lhdn.test/api/v1.0/documents/state/U1/state' => Http::response(['error' => ['detail' => 'x']], 400),
+    ]);
+
+    expect(fn () => $this->client->cancelDocument($this->issuer, 'U1', 'reason'))->toThrow(fn (LhdnException $e) => expect($e->kind)->toBe(LhdnErrorKind::Terminal)->and($e->getMessage())->toContain('detail'));
+});

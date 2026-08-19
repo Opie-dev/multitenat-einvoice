@@ -149,10 +149,20 @@ class HttpLhdnClient implements LhdnClient
     private function call(Issuer $issuer, string $operation, ?string $documentId, ?string $submissionUid, ?array $requestSummary, callable $send): array
     {
         $start = hrtime(true);
+        $this->breaker->guard($this->environment);
+        // Tracks whether $this->token($issuer) below has already returned successfully. fetchToken() fully
+        // records its own attempt + breaker outcome, so a failure that occurs before this flips true must
+        // propagate untouched — recording it again here (mislabelled under $operation, since no HTTP call to
+        // $operation's endpoint was ever made) would double-count both the SubmissionAttempt row and the
+        // circuit breaker failure for what is really a single underlying failure.
+        $tokenAcquired = false;
         try {
-            $this->breaker->guard($this->environment);
-            $token = $this->token($issuer);
-            $response = $this->limiter->attempt($issuer, $operation, fn () => $send($this->api()->withToken($token->token)));
+            $response = $this->limiter->attempt($issuer, $operation, function () use ($issuer, $send, &$tokenAcquired) {
+                $token = $this->token($issuer);
+                $tokenAcquired = true;
+
+                return $send($this->api()->withToken($token->token));
+            });
             $data = $this->classify($response);
             $uid = $submissionUid ?? (isset($data['submissionUid']) ? (string) $data['submissionUid'] : null);
             $this->attempts->record($issuer, $this->environment, $operation, $documentId, $uid, $response->status(), $requestSummary, $data, null, $this->ms($start));
@@ -160,11 +170,17 @@ class HttpLhdnClient implements LhdnClient
 
             return $data;
         } catch (ConnectionException $e) {
+            if (! $tokenAcquired) {
+                throw $e;
+            }
             $ex = LhdnException::transient('LHDN API unreachable: '.$e->getMessage());
             $this->attempts->record($issuer, $this->environment, $operation, $documentId, $submissionUid, null, $requestSummary, null, $ex, $this->ms($start));
             $this->breaker->recordFailure($this->environment);
             throw $ex;
         } catch (LhdnException $e) {
+            if (! $tokenAcquired) {
+                throw $e;
+            }
             $this->attempts->record($issuer, $this->environment, $operation, $documentId, $submissionUid, $e->httpStatus, $requestSummary, $e->payload, $e, $this->ms($start));
             if ($e->kind === LhdnErrorKind::Auth) {
                 $this->tokens->forget($this->environment, $this->credentials);
