@@ -125,7 +125,7 @@ Every LHDN client call raises `App\Lhdn\LhdnException` with a `LhdnErrorKind`:
   `CircuitBreaker::guard()` before any request is sent.
 
 Only failures that actually reached LHDN move the breaker, and only
-platform-level ones: connection errors and 5xx responses. An HTTP 429 *from*
+platform-level ones: connection errors and 5xx responses on a call that was actually sent (a connection error raised while fetching the token is recorded and counted once, by the token fetch itself). An HTTP 429 *from*
 MyInvois is a per-taxpayer rate limit, not an outage, so it never opens the
 breaker for the whole environment; neither does our own `LhdnRateLimiter`
 rejection or an already-open breaker, which are refused before any request is
