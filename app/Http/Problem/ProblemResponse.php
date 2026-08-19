@@ -5,6 +5,8 @@ namespace App\Http\Problem;
 use App\Domain\Documents\CancellationWindowClosed;
 use App\Domain\Documents\InvalidTransition;
 use App\Exceptions\ProblemException;
+use App\Lhdn\LhdnErrorKind;
+use App\Lhdn\LhdnException;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
@@ -91,6 +93,13 @@ class ProblemResponse
         }
         if ($e instanceof CancellationWindowClosed) {
             return [409, 'Conflict', $e->getMessage(), 'cancellation_window_closed', []];
+        }
+        if ($e instanceof LhdnException) {
+            return match ($e->kind) {
+                LhdnErrorKind::Auth => [409, 'Conflict', $e->getMessage(), 'lhdn_credentials_invalid', []],
+                LhdnErrorKind::Terminal => [422, 'Unprocessable Entity', $e->getMessage(), 'lhdn_rejected', []],
+                default => [503, 'Service Unavailable', $e->getMessage(), 'lhdn_unavailable', []],
+            };
         }
         if ($e instanceof HttpExceptionInterface) {
             $status = $e->getStatusCode();
