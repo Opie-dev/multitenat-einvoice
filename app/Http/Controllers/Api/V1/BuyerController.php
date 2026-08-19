@@ -16,7 +16,8 @@ class BuyerController extends Controller
     public function index(Request $request): CursorPaginatedDataCollection
     {
         $query = Buyer::query()->orderByDesc('created_at')->orderByDesc('id');
-        if ($tin = $request->query('tin')) {
+        $tin = $request->query('tin');
+        if (is_string($tin) && $tin !== '') {
             $query->where('tin', $tin);
         }
 

@@ -55,7 +55,7 @@ class Issuer extends Model
     use BelongsToTenant, HasFactory, HasUlids;
 
     /** @var list<string> */
-    protected $guarded = ['id'];
+    protected $guarded = ['id', 'tenant_id'];
 
     /** @return array<string, string> */
     protected function casts(): array

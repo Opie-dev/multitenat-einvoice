@@ -25,6 +25,9 @@ class IssuerSecretHistory extends Model
     /** @var list<string> */
     protected $guarded = ['id'];
 
+    /** @var list<string> */
+    protected $hidden = ['payload'];
+
     /** @return array<string, string> */
     protected function casts(): array
     {

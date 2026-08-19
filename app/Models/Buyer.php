@@ -38,7 +38,8 @@ class Buyer extends Model
     /** @use HasFactory<BuyerFactory> */
     use BelongsToTenant, HasFactory, HasUlids;
 
-    protected $guarded = ['id'];
+    /** @var list<string> */
+    protected $guarded = ['id', 'tenant_id'];
 
     protected function casts(): array
     {

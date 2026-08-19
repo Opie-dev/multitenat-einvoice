@@ -65,6 +65,7 @@ Environment rule: a `test` key can only touch issuers with `environment = sandbo
 
 ### 3.3 Rate limiting
 Per credential (Redis, `throttle:api`) plus per-issuer LHDN budget (see 6.4).
+Implemented as Laravel `throttle:api` keyed by SHA-256 of the bearer token (fallback: IP), default 60/min via `EINVOICE_RATE_LIMIT_PER_MINUTE`.
 
 ## 4. Issuers, secrets, buyers
 
@@ -184,12 +185,14 @@ Base: `/v1`, JSON, `Authorization: Bearer <api key | service token>`, `X-Tenant-
 |---|---|---|---|
 | POST | /tenants | tenants:manage (service only) | create tenant |
 | POST/GET/DELETE | /api-keys, /api-keys/{id} | issuers:manage | key shown once |
-| POST/GET/PATCH | /issuers, /issuers/{id} | issuers:manage | |
+| POST/PATCH | /issuers, /issuers/{id} | issuers:manage | |
+| GET | /issuers, /issuers/{id} | read | |
 | POST | /issuers/{id}/verify-tin | issuers:manage | -> tin_verified |
 | PUT | /issuers/{id}/credentials | issuers:manage | own_credentials mode |
 | PUT | /issuers/{id}/certificate | issuers:manage | multipart or base64 |
 | POST | /issuers/{id}/authorize | issuers:manage | tests token fetch -> authorized/active |
-| POST/GET/PATCH | /buyers, /buyers/{id} | documents:write | |
+| POST/PATCH | /buyers, /buyers/{id} | documents:write | |
+| GET | /buyers, /buyers/{id} | read | |
 | POST | /tin/validate | read | |
 | POST | /documents | documents:write | create + validate + auto-submit (`submit: true` default) |
 | POST | /documents/batch | documents:write | max 100 |
@@ -236,6 +239,7 @@ Laravel 12 · PHP 8.3 · MySQL 8 · Redis · Horizon · Pest · spatie/laravel-d
 | v1 scope | API only | user decision; SDK + portal later |
 | API DTOs | spatie/laravel-data for all request validation + response serialisation | user decision (2026-08-19); one typed contract per endpoint, reusable by the SDK later |
 | Dashboard front end | Inertia.js + React served by the engine | user decision (2026-08-19) |
+| Read abilities | GET issuers/buyers require `read` | least privilege; recorded during Plan 1 final review |
 
 ## 13. Follow-up projects (out of scope here)
 1. `billplz/einvoice-sdk` PHP package (thin client + Laravel service provider).
