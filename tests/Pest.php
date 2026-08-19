@@ -1,6 +1,7 @@
 <?php
 
 use App\Enums\Environment;
+use App\Lhdn\Fake\FakeLhdnClient;
 use App\Models\ApiKey;
 use App\Models\ServiceToken;
 use App\Models\Tenant;
@@ -23,6 +24,11 @@ if (getenv('OPENSSL_CONF') === false) {
 
 pest()->extend(TestCase::class)->use(RefreshDatabase::class)->in('Feature');
 pest()->extend(TestCase::class)->in('Unit');
+
+function fakeLhdn(): FakeLhdnClient
+{
+    return app(FakeLhdnClient::class);
+}
 
 function serviceToken(array $abilities = ['*']): string
 {
