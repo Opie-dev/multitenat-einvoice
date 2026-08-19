@@ -8,9 +8,11 @@ use Illuminate\Auth\AuthenticationException;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
+use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 use Throwable;
 
 class ProblemResponse
@@ -50,7 +52,7 @@ class ProblemResponse
                 foreach (array_keys($rules) as $i => $rule) {
                     $errors[] = [
                         'pointer' => '/'.str_replace('.', '/', $field),
-                        'code' => strtolower(class_basename((string) $rule)),
+                        'code' => Str::snake(class_basename((string) $rule)),
                         'message' => $messages[$i] ?? ($messages[0] ?? 'Invalid.'),
                     ];
                 }
@@ -72,6 +74,9 @@ class ProblemResponse
             return [403, 'Forbidden', $e->getMessage() ?: 'Forbidden.', 'forbidden', []];
         }
         if ($e instanceof ModelNotFoundException) {
+            return [404, 'Not Found', 'Resource not found.', 'not_found', []];
+        }
+        if ($e instanceof NotFoundHttpException) {
             return [404, 'Not Found', 'Resource not found.', 'not_found', []];
         }
         if ($e instanceof HttpExceptionInterface) {
