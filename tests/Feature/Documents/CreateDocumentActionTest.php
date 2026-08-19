@@ -146,6 +146,22 @@ it('rejects metadata larger than 8 KB', function () {
         ->toThrow(fn (ValidationException $e) => expect($e->errors())->toHaveKey('metadata'));
 });
 
+it('rejects tax figures that contradict an exempt tax type', function () {
+    expect(fn () => $this->create->handle(CreateDocumentData::from(docPayload($this->issuer, [
+        'lines' => [['tax_type' => 'E', 'tax_rate' => 6, 'tax_exemption_reason' => 'Exempt under Schedule A']],
+    ]))))->toThrow(fn (ValidationException $e) => expect($e->errors())->toHaveKey('lines.0.tax_rate'));
+
+    expect(fn () => $this->create->handle(CreateDocumentData::from(docPayload($this->issuer, [
+        'lines' => [['tax_type' => '06', 'tax_rate' => null, 'tax_amount' => '1.00']],
+    ]))))->toThrow(fn (ValidationException $e) => expect($e->errors())->toHaveKey('lines.0.tax_amount'));
+});
+
+it('rejects line metadata larger than 8 KB', function () {
+    expect(fn () => $this->create->handle(CreateDocumentData::from(docPayload($this->issuer, [
+        'lines' => [['metadata' => ['blob' => str_repeat('x', 9000)]]],
+    ]))))->toThrow(fn (ValidationException $e) => expect($e->errors())->toHaveKey('lines.0.metadata'));
+});
+
 it('maps totals mismatches to validation errors with dotted keys', function () {
     expect(fn () => $this->create->handle(CreateDocumentData::from(docPayload($this->issuer, ['lines' => [['total' => '99.00']]]))))
         ->toThrow(fn (ValidationException $e) => expect($e->errors())->toHaveKey('lines.0.total'));
