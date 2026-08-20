@@ -21,6 +21,7 @@ use Illuminate\Support\Carbon;
  * @property string|null $cert_fingerprint
  * @property Carbon|null $cert_not_before
  * @property Carbon|null $cert_not_after
+ * @property int|null $expiry_notified_at_days
  * @property Carbon|null $credentials_verified_at
  * @property Carbon $created_at
  * @property Carbon $updated_at
@@ -45,6 +46,7 @@ class IssuerSecret extends Model
             'signing_key' => 'encrypted',
             'cert_not_before' => 'datetime',
             'cert_not_after' => 'datetime',
+            'expiry_notified_at_days' => 'integer',
             'credentials_verified_at' => 'datetime',
         ];
     }

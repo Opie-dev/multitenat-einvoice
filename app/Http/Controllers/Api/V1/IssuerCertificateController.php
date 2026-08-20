@@ -50,6 +50,7 @@ class IssuerCertificateController extends Controller
                 'cert_fingerprint' => $info->fingerprint,
                 'cert_not_before' => $info->notBefore,
                 'cert_not_after' => $info->notAfter,
+                'expiry_notified_at_days' => null,
             ])->save();
             $issuer->forceFill(['certificate_valid_until' => $info->notAfter])->save();
         });

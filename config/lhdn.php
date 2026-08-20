@@ -47,5 +47,6 @@ return [
 
     'duplicate_rejection_codes' => ['DUPLICATE_SUBMISSION'],
 
-    'attempts_retention_days' => 2555,
+    // ~7 years, per the LHDN record-keeping requirement (spec §7.5).
+    'attempts_retention_days' => (int) env('LHDN_ATTEMPTS_RETENTION_DAYS', 2555),
 ];
