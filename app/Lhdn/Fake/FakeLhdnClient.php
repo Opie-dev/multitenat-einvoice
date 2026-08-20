@@ -143,10 +143,22 @@ class FakeLhdnClient implements LhdnClient
         $this->rejections[$internalId] = ['code' => $code, 'message' => $message];
     }
 
+    /**
+     * Scripting helper for tests that need a document to exist in the fake's
+     * registry without going through submitDocuments() first — e.g. seeding a
+     * document LHDN already knows about before a status-refresh call.
+     *
+     * @param  list<array{code: string, message: string}>  $errors
+     */
+    public function registerDocument(string $uuid, string $status, ?string $longId = null, array $errors = []): void
+    {
+        $this->documents[$uuid] = ['internalId' => '', 'status' => $status, 'longId' => $longId, 'errors' => $errors];
+    }
+
     /** @param list<array{code: string, message: string}> $errors */
     public function markInvalid(string $uuid, array $errors): void
     {
-        $document = $this->documents[$uuid];
+        $document = $this->documents[$uuid] ?? ['internalId' => '', 'status' => 'Invalid', 'longId' => null, 'errors' => []];
         $document['status'] = 'Invalid';
         $document['errors'] = $errors;
         $this->documents[$uuid] = $document;
@@ -154,14 +166,14 @@ class FakeLhdnClient implements LhdnClient
 
     public function markRejected(string $uuid): void
     {
-        $document = $this->documents[$uuid];
+        $document = $this->documents[$uuid] ?? ['internalId' => '', 'status' => 'Rejected', 'longId' => null, 'errors' => []];
         $document['status'] = 'Rejected';
         $this->documents[$uuid] = $document;
     }
 
     public function markCancelled(string $uuid): void
     {
-        $document = $this->documents[$uuid];
+        $document = $this->documents[$uuid] ?? ['internalId' => '', 'status' => 'Cancelled', 'longId' => null, 'errors' => []];
         $document['status'] = 'Cancelled';
         $this->documents[$uuid] = $document;
     }

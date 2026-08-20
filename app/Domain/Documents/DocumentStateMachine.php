@@ -25,7 +25,19 @@ class DocumentStateMachine
         'awaiting_consolidation' => ['consolidated', 'queued'],
         'cancelled' => [],
         'rejected' => [],
-        'consolidated' => [],
+        'consolidated' => ['awaiting_consolidation'],
+    ];
+
+    /**
+     * LHDN-authoritative verdicts `applyLhdnVerdict()` may apply. These bypass the
+     * local cancellation window: once LHDN has settled a document, its answer is
+     * final regardless of when our copy last saw it become valid.
+     *
+     * @var array<string, list<string>>
+     */
+    private const LHDN_VERDICTS = [
+        'valid' => ['cancelled', 'rejected'],
+        'submitted' => ['valid', 'invalid'],
     ];
 
     public function canTransition(DocumentStatus $from, DocumentStatus $to): bool
@@ -48,6 +60,34 @@ class DocumentStateMachine
         if ($to === DocumentStatus::Cancelled && ! $document->isCancellable()) {
             throw new CancellationWindowClosed;
         }
+
+        return $this->performTransition($document, $to, $reason, $meta, $heldReason);
+    }
+
+    /**
+     * Applies a verdict LHDN itself reported (buyer rejection, LHDN-side
+     * cancellation, or a post-submit valid/invalid). Unlike transition(), this
+     * skips the local cancellation window — LHDN is authoritative — but is
+     * restricted to the narrow set of pairs LHDN can actually report.
+     *
+     * @param  array<string, mixed>  $meta
+     */
+    public function applyLhdnVerdict(Document $document, DocumentStatus $to, ?string $reason = null, array $meta = []): ?DocumentEvent
+    {
+        if ($document->status === $to) {
+            return null;
+        }
+        if (! in_array($to->value, self::LHDN_VERDICTS[$document->status->value] ?? [], true)) {
+            throw new InvalidTransition($document->status, $to);
+        }
+
+        return $this->performTransition($document, $to, $reason, $meta, null);
+    }
+
+    /** @param array<string, mixed> $meta */
+    private function performTransition(Document $document, DocumentStatus $to, ?string $reason, array $meta, ?HeldReason $heldReason): DocumentEvent
+    {
+        $from = $document->status;
 
         return DB::transaction(function () use ($document, $from, $to, $reason, $meta, $heldReason): DocumentEvent {
             $now = now();
