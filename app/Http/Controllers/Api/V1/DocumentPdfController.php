@@ -2,7 +2,6 @@
 
 namespace App\Http\Controllers\Api\V1;
 
-use App\Enums\DocumentStatus;
 use App\Exceptions\ProblemException;
 use App\Http\Controllers\Controller;
 use App\Models\Document;
@@ -12,11 +11,9 @@ use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 class DocumentPdfController extends Controller
 {
-    private const AVAILABLE_STATUSES = [DocumentStatus::Valid, DocumentStatus::Cancelled, DocumentStatus::Rejected];
-
     public function show(Document $document, DocumentPdfGenerator $generator): BinaryFileResponse
     {
-        if (! in_array($document->status, self::AVAILABLE_STATUSES, true) || $document->lhdn_uuid === null) {
+        if (! in_array($document->status, DocumentPdfGenerator::AVAILABLE_STATUSES, true) || $document->lhdn_uuid === null) {
             throw ProblemException::conflict('The PDF is available once LHDN validates the document.', 'pdf_not_available');
         }
 

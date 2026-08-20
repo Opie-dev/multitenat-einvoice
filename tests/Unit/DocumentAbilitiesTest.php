@@ -1,11 +1,13 @@
 <?php
 
+use App\Actions\Documents\SubmitDocument;
 use App\Domain\Documents\DocumentAbilities;
 use App\Enums\DocumentStatus;
 use App\Enums\Environment;
 use App\Models\Document;
 use App\Models\Issuer;
 use App\Models\Tenant;
+use App\Pdf\DocumentPdfGenerator;
 use App\Tenancy\TenantContext;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
@@ -18,13 +20,34 @@ beforeEach(function () {
     $this->issuer = Issuer::factory()->for($tenant)->create();
 });
 
+it('keeps SubmitDocument::RESUBMITTABLE_STATUSES in sync with the expectations exercised below', function () {
+    // If this fails, either the constant changed or the match arms below
+    // (and DocumentAbilities' can_resubmit behaviour) need to change with it.
+    expect(SubmitDocument::RESUBMITTABLE_STATUSES)->toBe([
+        DocumentStatus::Validated,
+        DocumentStatus::Held,
+        DocumentStatus::Invalid,
+    ]);
+});
+
+it('keeps DocumentPdfGenerator::AVAILABLE_STATUSES in sync with the expectations exercised below', function () {
+    // If this fails, either the constant changed or the match arms below
+    // (and DocumentAbilities' can_pdf behaviour) need to change with it.
+    expect(DocumentPdfGenerator::AVAILABLE_STATUSES)->toBe([
+        DocumentStatus::Valid,
+        DocumentStatus::Cancelled,
+        DocumentStatus::Rejected,
+    ]);
+});
+
 it('derives abilities for every document status with no LHDN uuid and no window context', function (DocumentStatus $status) {
     $document = Document::factory()->for($this->issuer)->create(['status' => $status]);
 
-    // Mirrors SubmitDocument::handle()'s guard: only these statuses accept a
-    // submit/resubmit call. The state machine's TRANSITIONS map additionally
-    // allows `awaiting_consolidation` -> `queued`, but that path belongs to
-    // consolidation recovery, not the merchant-facing submit endpoint.
+    // Mirrors SubmitDocument::RESUBMITTABLE_STATUSES (asserted in sync with
+    // this list above). The state machine's TRANSITIONS map additionally
+    // allows `awaiting_consolidation` -> `queued`, but that edge has no
+    // caller anywhere in the codebase and SubmitDocument's whitelist
+    // excludes it regardless.
     $expectedResubmit = match ($status) {
         DocumentStatus::Validated, DocumentStatus::Held, DocumentStatus::Invalid => true,
         DocumentStatus::Draft, DocumentStatus::Queued, DocumentStatus::Submitted,
@@ -49,7 +72,8 @@ it('derives can_pdf for every document status once an LHDN uuid is present', fun
         'lhdn_uuid' => Str::upper(Str::random(26)),
     ]);
 
-    // Mirrors DocumentPdfController::AVAILABLE_STATUSES.
+    // Mirrors DocumentPdfGenerator::AVAILABLE_STATUSES (asserted in sync
+    // with this list above).
     $expectedPdf = match ($status) {
         DocumentStatus::Valid, DocumentStatus::Cancelled, DocumentStatus::Rejected => true,
         DocumentStatus::Draft, DocumentStatus::Validated, DocumentStatus::Held, DocumentStatus::Queued,
