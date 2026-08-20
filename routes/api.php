@@ -12,6 +12,7 @@ use App\Http\Controllers\Api\V1\MeController;
 use App\Http\Controllers\Api\V1\ReferenceController;
 use App\Http\Controllers\Api\V1\TenantController;
 use App\Http\Controllers\Api\V1\TinController;
+use App\Http\Controllers\Api\V1\WebhookEndpointController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/health', fn () => response()->json(['status' => 'ok']))->name('health');
@@ -27,6 +28,15 @@ Route::middleware('auth.api')->group(function () {
             Route::get('/api-keys', [ApiKeyController::class, 'index']);
             Route::post('/api-keys', [ApiKeyController::class, 'store']);
             Route::delete('/api-keys/{apiKey}', [ApiKeyController::class, 'destroy']);
+        });
+
+        Route::middleware('ability:webhooks:manage')->group(function () {
+            Route::get('/webhooks', [WebhookEndpointController::class, 'index']);
+            Route::post('/webhooks', [WebhookEndpointController::class, 'store']);
+            Route::get('/webhooks/{webhookEndpoint}', [WebhookEndpointController::class, 'show']);
+            Route::patch('/webhooks/{webhookEndpoint}', [WebhookEndpointController::class, 'update']);
+            Route::delete('/webhooks/{webhookEndpoint}', [WebhookEndpointController::class, 'destroy']);
+            Route::get('/webhooks/{webhookEndpoint}/deliveries', [WebhookEndpointController::class, 'deliveries']);
         });
 
         Route::middleware('ability:read')->group(function () {
