@@ -121,12 +121,13 @@ class PollSubmission implements ShouldQueue
         }
 
         // Post-valid states (buyer rejection / LHDN-side cancellation) are only
-        // detected when a poll happens to see them; a dedicated status-refresh
-        // path is Plan 4.
+        // detected here when a poll happens to see them; RefreshDocumentStatus
+        // (Plan 4) sweeps for the rest. Both share applyLhdnVerdict(), which is
+        // authoritative over the local cancellation window.
         if ($state === 'rejected') {
-            $stateMachine->transition($document, DocumentStatus::Rejected, 'buyer_rejected');
-        } elseif ($state === 'cancelled' && $document->isCancellable()) {
-            $stateMachine->transition($document, DocumentStatus::Cancelled, 'cancelled_at_lhdn');
+            $stateMachine->applyLhdnVerdict($document, DocumentStatus::Rejected, 'buyer_rejected');
+        } elseif ($state === 'cancelled') {
+            $stateMachine->applyLhdnVerdict($document, DocumentStatus::Cancelled, 'cancelled_at_lhdn');
         }
     }
 

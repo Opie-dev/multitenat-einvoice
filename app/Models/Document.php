@@ -60,6 +60,7 @@ use Illuminate\Support\Carbon;
  * @property Carbon|null $validated_at
  * @property Carbon|null $submitted_at
  * @property Carbon|null $lhdn_status_at
+ * @property Carbon|null $lhdn_refreshed_at
  * @property Carbon|null $cancelled_at
  * @property string|null $cancel_reason
  * @property string|null $consolidated_into_id
@@ -108,6 +109,7 @@ class Document extends Model
             'validated_at' => 'datetime',
             'submitted_at' => 'datetime',
             'lhdn_status_at' => 'datetime',
+            'lhdn_refreshed_at' => 'datetime',
             'cancelled_at' => 'datetime',
         ];
     }

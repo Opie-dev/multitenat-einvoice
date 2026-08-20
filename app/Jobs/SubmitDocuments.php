@@ -13,6 +13,7 @@ use App\Lhdn\LhdnException;
 use App\Lhdn\Pipeline\SubmissionErrors;
 use App\Models\Document;
 use App\Models\Issuer;
+use App\Models\SubmissionAttempt;
 use App\Tenancy\Jobs\TenantAwareJob;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -97,7 +98,12 @@ class SubmitDocuments implements ShouldQueue
                 ])->save();
                 $stateMachine->transition($document, DocumentStatus::Submitted);
             } elseif (isset($result->rejectedByInternalId[$internalId])) {
-                $errors = SubmissionErrors::fromRejection($result->rejectedByInternalId[$internalId]);
+                $rejection = $result->rejectedByInternalId[$internalId];
+                if ($this->isDuplicateRejection($rejection) && $this->recoverDuplicate($document, $issuer, $stateMachine)) {
+                    continue;
+                }
+
+                $errors = SubmissionErrors::fromRejection($rejection);
                 $document->forceFill([
                     'lhdn_errors' => $errors,
                     'submission_attempts_count' => $document->submission_attempts_count + 1,
@@ -202,6 +208,58 @@ class SubmitDocuments implements ShouldQueue
         if ($retryIn !== null) {
             self::dispatch($this->issuerId)->delay(now()->addSeconds($retryIn));
         }
+    }
+
+    /** @param array{code: string, message: string} $rejection */
+    private function isDuplicateRejection(array $rejection): bool
+    {
+        return in_array($rejection['code'], (array) config('lhdn.duplicate_rejection_codes', []), true)
+            || preg_match('/duplicat/i', $rejection['message']) === 1;
+    }
+
+    /**
+     * LHDN rejects a resend of a document it already accepted with the code that
+     * `isDuplicateRejection()` recognises. When that happens our own record of the
+     * earlier acceptance was lost (a worker died before the accepted uuid was
+     * saved, for instance) — so instead of declaring the document invalid, look
+     * back through this issuer's recent submit attempts for the uuid LHDN already
+     * assigned it and adopt that instead.
+     */
+    private function recoverDuplicate(Document $document, Issuer $issuer, DocumentStateMachine $stateMachine): bool
+    {
+        $internalId = (string) $document->lhdn_internal_id;
+
+        $attempts = SubmissionAttempt::query()
+            ->where('issuer_id', $issuer->id)
+            ->where('operation', 'submit')
+            ->whereNotNull('submission_uid')
+            ->latest('created_at')
+            ->limit(20)
+            ->get();
+
+        foreach ($attempts as $attempt) {
+            $accepted = (array) ($attempt->response['acceptedDocuments'] ?? []);
+            foreach ($accepted as $entry) {
+                if (! is_array($entry) || ($entry['invoiceCodeNumber'] ?? null) !== $internalId) {
+                    continue;
+                }
+                if (! isset($entry['uuid']) || ! is_string($entry['uuid']) || $entry['uuid'] === '') {
+                    continue; // codeNumber matches but the attempt never recorded a uuid; keep looking
+                }
+
+                $document->forceFill([
+                    'lhdn_uuid' => $entry['uuid'],
+                    'lhdn_submission_uid' => $attempt->submission_uid,
+                    'last_submission_error' => null,
+                ])->save();
+                $stateMachine->transition($document, DocumentStatus::Submitted, 'duplicate_recovered');
+                PollSubmission::dispatch($issuer->id, (string) $attempt->submission_uid);
+
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function firstPollDelay(): int

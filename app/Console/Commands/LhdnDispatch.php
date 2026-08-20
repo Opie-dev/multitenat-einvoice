@@ -7,6 +7,7 @@ use App\Enums\DocumentStatus;
 use App\Enums\Environment;
 use App\Jobs\PollSubmission;
 use App\Jobs\PrepareDocument;
+use App\Jobs\RefreshDocumentStatus;
 use App\Jobs\SubmitDocuments;
 use App\Models\Document;
 use App\Models\Tenant;
@@ -32,6 +33,9 @@ class LhdnDispatch extends Command
     private const LOST_PREPARE_AFTER_MINUTES = 1;
 
     private const STALE_POLL_AFTER_MINUTES = 2;
+
+    /** Cap per issuer per sweep, so one issuer's backlog can't starve the rest. */
+    private const REFRESH_SWEEP_LIMIT_PER_ISSUER = 50;
 
     public function handle(TenantContext $context): int
     {
@@ -100,6 +104,27 @@ class LhdnDispatch extends Command
         foreach ($stale as $document) {
             PollSubmission::dispatch($document->issuer_id, (string) $document->lhdn_submission_uid);
             $dispatched++;
+        }
+
+        $maxAgeDays = (int) config('lhdn.status_refresh.max_age_days', 7);
+        $intervalHours = (int) config('lhdn.status_refresh.interval_hours', 6);
+        $refreshEligible = fn (): Builder => $base()
+            ->where('status', DocumentStatus::Valid)
+            ->whereNotNull('lhdn_uuid')
+            ->where('lhdn_status_at', '>=', now()->subDays($maxAgeDays))
+            ->where(fn (Builder $query) => $query->whereNull('lhdn_refreshed_at')->orWhere('lhdn_refreshed_at', '<=', now()->subHours($intervalHours)));
+
+        $refreshIssuerIds = $refreshEligible()->distinct()->pluck('issuer_id');
+        foreach ($refreshIssuerIds as $issuerId) {
+            $documentIds = $refreshEligible()
+                ->where('issuer_id', $issuerId)
+                ->orderBy('lhdn_refreshed_at') // oldest (and never-refreshed, which sort first) go first
+                ->limit(self::REFRESH_SWEEP_LIMIT_PER_ISSUER)
+                ->pluck('id');
+            foreach ($documentIds as $documentId) {
+                RefreshDocumentStatus::dispatch((string) $documentId);
+                $dispatched++;
+            }
         }
 
         return $dispatched;
