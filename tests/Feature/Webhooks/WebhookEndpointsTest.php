@@ -5,6 +5,7 @@ use App\Enums\WebhookEvent;
 use App\Models\Tenant;
 use App\Models\WebhookDelivery;
 use App\Models\WebhookEndpoint;
+use Illuminate\Support\Facades\DB;
 
 it('creates a webhook endpoint and shows the secret once', function () {
     $tenant = Tenant::factory()->create();
@@ -26,6 +27,10 @@ it('creates a webhook endpoint and shows the secret once', function () {
 
     $endpoint = WebhookEndpoint::withoutGlobalScopes()->where('url', 'https://example.com/hooks/einvoice')->firstOrFail();
     expect($endpoint->secret)->toBe($secret);
+
+    // The signing secret is an `encrypted` cast: the column must never hold the plaintext.
+    $stored = DB::table('webhook_endpoints')->where('id', $endpoint->id)->value('secret');
+    expect($stored)->not->toBe($secret)->and($stored)->not->toBeNull();
 });
 
 it('allows non-https urls only for localhost', function () {
@@ -89,6 +94,52 @@ it('rejects a non-https url for a public host', function () {
     $tenant = Tenant::factory()->create();
     $this->withHeaders(serviceHeaders($tenant, 'sandbox'))
         ->postJson('/v1/webhooks', ['url' => 'http://example.com/hook', 'events' => [WebhookEvent::DocumentValid->value]])
+        ->assertStatus(422)
+        ->assertJsonFragment(['pointer' => '/url']);
+});
+
+/**
+ * Every case here is a literal IP so the rule never reaches gethostbyname(): the
+ * suite must not depend on DNS. `allow_local_urls` is on in phpunit.xml (so the
+ * loopback fixtures the rest of the suite registers keep working) and is turned
+ * off explicitly for these.
+ */
+it('rejects a webhook url pointing at a private or reserved address', function (string $url) {
+    config(['einvoice.webhooks.allow_local_urls' => false]);
+    $tenant = Tenant::factory()->create();
+
+    $this->withHeaders(serviceHeaders($tenant, 'sandbox'))
+        ->postJson('/v1/webhooks', ['url' => $url, 'events' => [WebhookEvent::DocumentValid->value]])
+        ->assertStatus(422)
+        ->assertJsonFragment(['pointer' => '/url']);
+})->with([
+    'loopback' => 'https://127.0.0.1/hook',
+    'cloud metadata' => 'https://169.254.169.254/latest/meta-data',
+    'rfc1918 /8' => 'https://10.0.0.5/hook',
+    'rfc1918 /12' => 'https://172.16.3.4/hook',
+    'rfc1918 /16' => 'https://192.168.1.10/hook',
+    'this network' => 'https://0.0.0.0/hook',
+    'ipv6 loopback' => 'https://[::1]/hook',
+    'ipv6 unique local' => 'https://[fd00::1]/hook',
+    'ipv6 link local' => 'https://[fe80::1]/hook',
+]);
+
+it('accepts a webhook url pointing at a public address', function () {
+    config(['einvoice.webhooks.allow_local_urls' => false]);
+    $tenant = Tenant::factory()->create();
+
+    $this->withHeaders(serviceHeaders($tenant, 'sandbox'))
+        ->postJson('/v1/webhooks', ['url' => 'https://93.184.216.34/hook', 'events' => [WebhookEvent::DocumentValid->value]])
+        ->assertCreated();
+});
+
+it('rejects a private address on update too', function () {
+    config(['einvoice.webhooks.allow_local_urls' => false]);
+    $tenant = Tenant::factory()->create();
+    $endpoint = WebhookEndpoint::factory()->for($tenant)->create(['environment' => Environment::Sandbox]);
+
+    $this->withHeaders(serviceHeaders($tenant, 'sandbox'))
+        ->patchJson("/v1/webhooks/{$endpoint->id}", ['url' => 'https://169.254.169.254/hook'])
         ->assertStatus(422)
         ->assertJsonFragment(['pointer' => '/url']);
 });

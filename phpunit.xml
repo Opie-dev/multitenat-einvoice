@@ -34,6 +34,8 @@
         <env name="QUEUE_CONNECTION" value="sync"/>
         <env name="SESSION_DRIVER" value="array"/>
         <env name="LHDN_DRIVER" value="fake"/>
+        <!-- Fixtures register loopback/example receivers; the SSRF rule's own tests turn this off. -->
+        <env name="EINVOICE_WEBHOOK_ALLOW_LOCAL_URLS" value="true"/>
         <env name="PULSE_ENABLED" value="false"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
         <env name="NIGHTWATCH_ENABLED" value="false"/>

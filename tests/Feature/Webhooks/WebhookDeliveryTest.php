@@ -104,7 +104,11 @@ it('exhausts a delivery once the backoff curve is spent', function () {
     app(TenantContext::class)->clear();
 
     $delivery->refresh();
-    expect($delivery->status)->toBe(WebhookDeliveryStatus::Exhausted)->and($delivery->attempt)->toBe(2);
+    expect($delivery->status)->toBe(WebhookDeliveryStatus::Exhausted)
+        ->and($delivery->attempt)->toBe(2)
+        // Cleared by the exhausting attempt: nothing is scheduled any more, and a
+        // stale timestamp would read as a retry still pending.
+        ->and($delivery->next_retry_at)->toBeNull();
     Http::assertSentCount(2);
 });
 

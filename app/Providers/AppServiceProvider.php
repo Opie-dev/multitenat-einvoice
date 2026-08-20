@@ -12,6 +12,7 @@ use App\Lhdn\LhdnDriverGuard;
 use App\Listeners\DispatchCertificateWebhooks;
 use App\Listeners\DispatchDocumentWebhooks;
 use App\Listeners\DispatchIssuerWebhooks;
+use App\Listeners\HoldDocumentsOnSuspension;
 use App\Listeners\PrepareDocumentOnQueued;
 use App\Listeners\ReleaseChildrenOnConsolidationFailure;
 use App\Listeners\ReleaseHeldDocumentsOnActivation;
@@ -58,6 +59,9 @@ class AppServiceProvider extends ServiceProvider
         Event::listen(DocumentTransitioned::class, ReleaseChildrenOnConsolidationFailure::class);
         Event::listen(IssuerActivated::class, ReleaseHeldDocumentsOnActivation::class);
         Event::listen(IssuerStatusChanged::class, DispatchIssuerWebhooks::class);
+        // After DispatchIssuerWebhooks so the issuer.status_changed delivery is
+        // recorded before the document.held ones its suspension causes.
+        Event::listen(IssuerStatusChanged::class, HoldDocumentsOnSuspension::class);
         Event::listen(CertificateExpiring::class, [DispatchCertificateWebhooks::class, 'handleExpiring']);
         Event::listen(CertificateExpired::class, [DispatchCertificateWebhooks::class, 'handleExpired']);
     }

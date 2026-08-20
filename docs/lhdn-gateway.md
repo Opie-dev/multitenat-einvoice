@@ -78,7 +78,7 @@ least-recently-refreshed documents next.
 | `DocumentSigner` | `app/Lhdn/Signing/*` | Signs the UBL JSON with the issuer's certificate. |
 | `PrepareDocument` | `app/Jobs/PrepareDocument.php` | `queued` -> build UBL -> sign -> store `ubl_json`/`signed_payload_hash`/`lhdn_internal_id` -> dispatch `SubmitDocuments`. Holds the document instead if the issuer isn't active, has no valid certificate, or the LHDN payload size limit is exceeded (`Invalid` for the size case). |
 | `SubmitDocuments` | `app/Jobs/SubmitDocuments.php` | Batches one issuer's prepared, due (`next_submission_at`) documents (oldest first, up to `submission.max_documents` / `submission.max_bytes`) into one `submitDocuments` call; settles accepted documents to `submitted` and dispatches `PollSubmission`; settles rejected ones to `invalid`; on a client exception, applies retry/backoff or holds per §4 below. |
-| `PollSubmission` | `app/Jobs/PollSubmission.php` | Polls `getSubmission` for one `submissionUid`; settles each document to `valid`/`invalid`; reschedules itself along `poll.backoff_seconds` until the submission is final. A failed *read* never settles a document (see §4); at the end of the curve it falls back to a per-document `getDocument` check. It can also settle a previously-`valid` document reported `rejected`/`cancelled`, but only if a poll happens to run at that moment — see the note in §1. |
+| `PollSubmission` | `app/Jobs/PollSubmission.php` | Polls `getSubmission` for one `submissionUid`; settles each document to `valid`/`invalid`; reschedules itself along `poll.backoff_seconds` until the submission is final. A failed *read* never settles a document (see §4); at the end of the curve it falls back to a per-document `getDocument` check. It can also settle a previously-`valid` document reported `rejected`/`cancelled`, but only if a poll happens to run at that moment; the reliable path for those two edges is `RefreshDocumentStatus` (row below). |
 | `ReleaseHeldDocuments` | `app/Jobs/ReleaseHeldDocuments.php` | Re-queues documents held for a releasable reason once the issuer activates. |
 | `RefreshDocumentStatus` | `app/Jobs/RefreshDocumentStatus.php` | Re-reads one already-`valid` document via `getDocument` and applies `rejected`/`cancelled` if LHDN's answer changed; stamps `lhdn_refreshed_at` either way. Dispatched only by the `einvoice:lhdn-dispatch` sweep — see §1. |
 | `einvoice:lhdn-dispatch` | `app/Console/Commands/LhdnDispatch.php` | Safety-net sweep (see §3), also the sole driver of `RefreshDocumentStatus`. |
@@ -226,8 +226,11 @@ stalling a document forever.
 A daily job, `einvoice:monitor-certificates` (scheduled 02:00
 Asia/Kuala_Lumpur), now notices a certificate expiring on its own (spec
 §7.4). It walks every tenant/environment/issuer with a certificate: an
-`active` issuer whose certificate has lapsed is suspended (`certificate.expired`
-fires, its documents move to `held` with reason `certificate_expired`); one
+`active` issuer whose certificate has lapsed is suspended — `certificate.expired`
+fires and `App\Listeners\HoldDocumentsOnSuspension` (on `IssuerStatusChanged`)
+moves that issuer's `queued` documents to `held` with reason
+`certificate_expired`, leaving already-`submitted` documents in flight, since
+they cannot be recalled; one
 still valid but crossing a 30/7/1-day threshold gets a single
 `certificate.expiring` webhook per threshold, deduped via
 `issuer_secrets.expiry_notified_at_days` (reset to `null` on every new

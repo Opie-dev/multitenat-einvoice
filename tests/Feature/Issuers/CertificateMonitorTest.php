@@ -1,9 +1,14 @@
 <?php
 
+use App\Enums\DocumentStatus;
 use App\Enums\Environment;
+use App\Enums\HeldReason;
 use App\Enums\IssuerStatus;
 use App\Enums\WebhookEvent;
+use App\Events\CertificateExpiring;
+use App\Jobs\PrepareDocument;
 use App\Models\AuditLog;
+use App\Models\Document;
 use App\Models\Issuer;
 use App\Models\SubmissionAttempt;
 use App\Models\Tenant;
@@ -11,7 +16,10 @@ use App\Models\WebhookDelivery;
 use App\Models\WebhookEndpoint;
 use App\Tenancy\TenantContext;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Queue;
 
 $fx = fn (string $f) => (string) file_get_contents(base_path("tests/Fixtures/certs/{$f}"));
 
@@ -161,6 +169,72 @@ it('reactivates the issuer and resets expiry_notified_at_days on a new certifica
 
     expect($issuer->fresh()->status)->toBe(IssuerStatus::Active);
     expect($secret->fresh()->expiry_notified_at_days)->toBeNull();
+});
+
+it('holds queued documents when the issuer is suspended and releases them on re-upload', function () use ($fx) {
+    Http::fake(['https://hooks.example.test/*' => Http::response(['ok' => true], 200)]);
+    $tenant = Tenant::factory()->create();
+    $validUntil = now()->addDay();
+    $issuer = Issuer::factory()->for($tenant)->active()->create([
+        'environment' => Environment::Sandbox,
+        'certificate_valid_until' => $validUntil,
+    ]);
+    app(TenantContext::class)->bind($tenant, null, Environment::Sandbox);
+    $issuer->secret()->create(['signing_certificate' => 'x', 'signing_key' => 'y', 'cert_not_after' => $validUntil]);
+    $document = Document::factory()->for($issuer)->queued()->create(['environment' => Environment::Sandbox]);
+    app(TenantContext::class)->clear();
+
+    // The release path re-queues the document; the submission pipeline itself is not under test here.
+    Queue::fake([PrepareDocument::class]);
+
+    $this->travel(2)->days();
+    Artisan::call('einvoice:monitor-certificates');
+
+    expect($issuer->fresh()->status)->toBe(IssuerStatus::Suspended);
+    expect($document->refresh()->status)->toBe(DocumentStatus::Held)
+        ->and($document->held_reason)->toBe(HeldReason::CertificateExpired);
+
+    $this->withHeaders(serviceHeaders($tenant, 'sandbox'))
+        ->putJson("/v1/issuers/{$issuer->id}/certificate", [
+            'format' => 'pem', 'certificate' => $fx('test-cert.pem'), 'private_key' => $fx('test-key.pem'),
+        ])
+        ->assertOk();
+
+    expect($document->refresh()->status)->toBe(DocumentStatus::Queued);
+});
+
+it('keeps sweeping when one issuer throws, records the notice anyway and exits non-zero', function () {
+    Log::spy();
+    $tenant = Tenant::factory()->create();
+    $validUntil = now()->addDays(29);
+
+    app(TenantContext::class)->bind($tenant, null, Environment::Sandbox);
+    $bad = Issuer::factory()->for($tenant)->active()->create(['environment' => Environment::Sandbox, 'certificate_valid_until' => $validUntil]);
+    $badSecret = $bad->secret()->create(['signing_certificate' => 'x', 'signing_key' => 'y', 'cert_not_after' => $validUntil]);
+    $good = Issuer::factory()->for($tenant)->active()->create(['environment' => Environment::Sandbox, 'certificate_valid_until' => $validUntil]);
+    $goodSecret = $good->secret()->create(['signing_certificate' => 'x', 'signing_key' => 'y', 'cert_not_after' => $validUntil]);
+    app(TenantContext::class)->clear();
+
+    Event::listen(CertificateExpiring::class, function (CertificateExpiring $event) use ($bad): void {
+        if ($event->issuer->id === $bad->id) {
+            throw new RuntimeException('notification pipeline down');
+        }
+    });
+
+    expect(Artisan::call('einvoice:monitor-certificates'))->toBe(1);
+
+    // The dedupe marker is written before the notice is dispatched, so a listener
+    // that blows up cannot make the next run re-send the same threshold's notice.
+    expect($badSecret->fresh()->expiry_notified_at_days)->toBe(30);
+    // The failure is contained: the next issuer in the sweep is still processed.
+    expect($goodSecret->fresh()->expiry_notified_at_days)->toBe(30);
+
+    // report() logs too, so the matcher has to tolerate other error calls.
+    Log::shouldHaveReceived('error')->withArgs(fn (string $message, array $context = []): bool => $message === 'certificate.monitor_skipped'
+        && ($context['tenant_id'] ?? null) === $tenant->id
+        && ($context['issuer_id'] ?? null) === $bad->id
+        && ($context['environment'] ?? null) === 'sandbox'
+        && str_contains((string) ($context['exception'] ?? ''), 'notification pipeline down'));
 });
 
 it('prunes submission attempts older than the retention window and keeps the rest', function () {

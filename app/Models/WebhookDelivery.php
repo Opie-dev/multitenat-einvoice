@@ -4,7 +4,9 @@ namespace App\Models;
 
 use App\Enums\WebhookDeliveryStatus;
 use App\Tenancy\BelongsToTenant;
+use App\Tenancy\TenantContext;
 use Database\Factories\WebhookDeliveryFactory;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -56,12 +58,16 @@ class WebhookDelivery extends Model
     }
 
     /**
-     * Deliveries carry no environment column (only their endpoint does), so the
-     * tenant global scope alone is enough to keep this cross-tenant safe; stated
-     * explicitly here rather than relying on Eloquent's implicit default.
+     * Deliveries carry no environment column — only their endpoint does — so the
+     * tenant global scope alone would let a sandbox credential redeliver a
+     * production payload. The binding therefore scopes through the endpoint's
+     * environment as well; a mismatch is a miss, i.e. 404, never 403.
      */
     public function resolveRouteBinding($value, $field = null): ?Model
     {
-        return static::query()->where($field ?? $this->getRouteKeyName(), $value)->first();
+        return static::query()
+            ->where($field ?? $this->getRouteKeyName(), $value)
+            ->whereHas('endpoint', fn (Builder $q) => $q->where('environment', app(TenantContext::class)->environment()))
+            ->first();
     }
 }

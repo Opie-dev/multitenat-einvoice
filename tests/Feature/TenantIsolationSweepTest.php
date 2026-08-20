@@ -94,6 +94,9 @@ dataset('cross_environment_routes', function () {
         'webhook show (prod webhook, test key)' => [fn (Tenant $t) => WebhookEndpoint::factory()->for($t)->create(['environment' => Environment::Production]), 'GET', '/v1/webhooks/{id}'],
         'webhook deliveries (prod webhook, test key)' => [fn (Tenant $t) => WebhookEndpoint::factory()->for($t)->create(['environment' => Environment::Production]), 'GET', '/v1/webhooks/{id}/deliveries'],
         'webhook test (prod webhook, test key)' => [fn (Tenant $t) => WebhookEndpoint::factory()->for($t)->create(['environment' => Environment::Production]), 'POST', '/v1/webhooks/{id}/test'],
+        'webhook delivery redeliver' => [fn (Tenant $t) => WebhookDelivery::factory()->for($t)->create([
+            'webhook_endpoint_id' => WebhookEndpoint::factory()->for($t)->create(['environment' => Environment::Production])->id,
+        ]), 'POST', '/v1/webhook-deliveries/{id}/redeliver'],
     ];
 });
 

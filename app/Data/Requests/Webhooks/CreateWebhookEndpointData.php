@@ -3,7 +3,7 @@
 namespace App\Data\Requests\Webhooks;
 
 use App\Enums\WebhookEvent;
-use Closure;
+use App\Rules\PublicHttpsUrl;
 use Illuminate\Validation\Rule;
 use Spatie\LaravelData\Attributes\Validation\Max;
 use Spatie\LaravelData\Data;
@@ -23,23 +23,9 @@ class CreateWebhookEndpointData extends Data
     public static function rules(ValidationContext $context): array
     {
         return [
-            'url' => ['required', 'string', 'max:500', 'url', self::httpsRule()],
+            'url' => ['required', 'string', 'max:500', 'url', new PublicHttpsUrl],
             'events' => ['required', 'array', 'min:1'],
             'events.*' => [Rule::in(WebhookEvent::values())],
         ];
-    }
-
-    private static function httpsRule(): Closure
-    {
-        return static function (string $attribute, mixed $value, Closure $fail): void {
-            if (! is_string($value)) {
-                return;
-            }
-            $scheme = parse_url($value, PHP_URL_SCHEME);
-            $host = parse_url($value, PHP_URL_HOST);
-            if ($scheme !== 'https' && ! in_array($host, ['localhost', '127.0.0.1'], true)) {
-                $fail('Webhook URLs must use HTTPS.');
-            }
-        };
     }
 }

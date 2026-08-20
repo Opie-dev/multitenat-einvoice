@@ -10,6 +10,7 @@ use App\Enums\Environment;
 use App\Enums\WebhookEvent;
 use App\Jobs\PrepareDocument;
 use App\Models\Document;
+use App\Models\DocumentEvent;
 use App\Models\Issuer;
 use App\Models\Tenant;
 use App\Models\WebhookDelivery;
@@ -207,6 +208,30 @@ it('defaults to the previous month when no --month is given', function () {
 it('rejects a malformed --month', function () {
     expect(Artisan::call('einvoice:consolidate', ['--month' => 'July-2026']))->toBe(1);
     expect(Document::query()->where('source_system', ConsolidateIssuerMonth::SOURCE_SYSTEM)->count())->toBe(0);
+});
+
+it('links every child before the parent is released for submission', function () {
+    consolidationChild($this->issuer, 'pos-001', '022', '10.00', '2026-07-02');
+    consolidationChild($this->issuer, 'pos-002', '022', '20.50', '2026-07-14');
+
+    Artisan::call('einvoice:consolidate', ['--month' => '2026-07']);
+
+    $parent = consolidatedParent('MYR');
+    // ULIDs are monotonic, so ordering by id is the transition order.
+    $sequence = DocumentEvent::query()
+        ->orderBy('id')
+        ->get()
+        ->map(fn (DocumentEvent $e): string => ($e->document_id === $parent->id ? 'parent' : 'child').':'.$e->to_status->value)
+        ->all();
+
+    $links = array_keys($sequence, 'child:consolidated', true);
+    $released = array_search('parent:queued', $sequence, true);
+
+    // A rejection arriving mid-link would strand the not-yet-linked receipts, so
+    // the parent must not reach the queue until every child is attached to it.
+    expect($links)->toHaveCount(2)
+        ->and($released)->not->toBeFalse()
+        ->and(max($links))->toBeLessThan($released);
 });
 
 it('returns children to awaiting_consolidation and fires a webhook when the parent goes invalid', function () {

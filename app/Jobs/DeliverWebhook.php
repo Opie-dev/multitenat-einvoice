@@ -70,7 +70,7 @@ class DeliverWebhook implements ShouldQueue
                 ->withBody($body, 'application/json')
                 ->post($endpoint->url);
         } catch (ConnectionException $e) {
-            $this->fail($delivery, null, null, mb_substr($e->getMessage(), 0, 500));
+            $this->recordFailure($delivery, null, null, mb_substr($e->getMessage(), 0, 500));
 
             return;
         }
@@ -86,10 +86,11 @@ class DeliverWebhook implements ShouldQueue
             return;
         }
 
-        $this->fail($delivery, $response->status(), mb_substr($response->body(), 0, 500), null);
+        $this->recordFailure($delivery, $response->status(), mb_substr($response->body(), 0, 500), null);
     }
 
-    private function fail(WebhookDelivery $delivery, ?int $httpStatus, ?string $snippet, ?string $error): void
+    /** Named away from InteractsWithQueue::fail(), which it would otherwise shadow. */
+    private function recordFailure(WebhookDelivery $delivery, ?int $httpStatus, ?string $snippet, ?string $error): void
     {
         $attempt = $delivery->attempt + 1;
         $backoff = $this->backoffSeconds();
@@ -103,6 +104,8 @@ class DeliverWebhook implements ShouldQueue
 
         if ($attempt > count($backoff)) {
             $delivery->status = WebhookDeliveryStatus::Exhausted;
+            // Nothing is scheduled any more; a leftover timestamp would read as a pending retry.
+            $delivery->next_retry_at = null;
             $delivery->save();
 
             return;

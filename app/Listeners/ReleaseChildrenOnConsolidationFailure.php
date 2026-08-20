@@ -37,11 +37,13 @@ class ReleaseChildrenOnConsolidationFailure
             return;
         }
 
+        // Streamed by id: a rejected month can hold hundreds of thousands of
+        // receipts, and paging by id means transitioning a row out of
+        // `consolidated` cannot make the walk skip the rest of its page.
         $children = Document::query()
             ->where('consolidated_into_id', $event->document->id)
             ->where('status', DocumentStatus::Consolidated)
-            ->orderBy('source_ref')
-            ->get();
+            ->lazyById(500);
 
         $name = WebhookEvent::DocumentConsolidationFailed->value;
         foreach ($children as $child) {

@@ -183,7 +183,7 @@ Table: `reference_codes` (`set`, `code`, `description`, `extra` json, `version`;
 ### 7.4 Certificate lifecycle
 Daily job checks `cert_not_after`; emits `certificate.expiring` at 30/7/1 days, `certificate.expired` and moves issuer to `suspended` (documents -> `held`, reason `certificate_expired`) on expiry. Uploading a new cert re-activates and releases held documents.
 
-**As-built (amended 2026-08-20, Plan 4):** `einvoice:monitor-certificates`, scheduled daily at 02:00 Asia/Kuala_Lumpur, walks every tenant/environment/issuer with a certificate. Expiry notices are deduped via `issuer_secrets.expiry_notified_at_days` — at most one `certificate.expiring` webhook per crossed threshold (checked closest-to-expiry first: 1, then 7, then 30 days out), and the column is reset to `null` on every new certificate upload so the next expiry cycle notifies again from a clean slate. An `active` issuer whose certificate has lapsed is suspended (`certificate.expired` fires, its documents move to `held` with reason `certificate_expired`) the next time the daily sweep runs, not at the instant the certificate expires.
+**As-built (amended 2026-08-20, Plan 4):** `einvoice:monitor-certificates`, scheduled daily at 02:00 Asia/Kuala_Lumpur, walks every tenant/environment/issuer with a certificate. Expiry notices are deduped via `issuer_secrets.expiry_notified_at_days` — at most one `certificate.expiring` webhook per crossed threshold (checked closest-to-expiry first: 1, then 7, then 30 days out), and the column is reset to `null` on every new certificate upload so the next expiry cycle notifies again from a clean slate. An `active` issuer whose certificate has lapsed is suspended the next time the daily sweep runs, not at the instant the certificate expires: `certificate.expired` fires, and `App\Listeners\HoldDocumentsOnSuspension` (on `IssuerStatusChanged`) moves that issuer's `queued` documents to `held` with reason `certificate_expired`. Documents already handed to LHDN (`submitted`) are left alone — they cannot be recalled and LHDN will still answer for them. Uploading a valid certificate re-activates the issuer, and `ReleaseHeldDocuments` re-queues those holds.
 
 ### 7.5 Audit
 `audit_logs`: tenant, actor, action, subject, ip, request id, diff (for issuers/secrets metadata/webhooks/keys). `submission_attempts` keep full LHDN exchanges. Retention: 7 years (LHDN requirement) — no automatic pruning of documents.
@@ -235,7 +235,7 @@ Versioning: URL prefix; breaking changes -> `/v2`.
 - No hosted CI for now (user decision 2026-08-19); `composer check` (Pint + PHPStan level 8 + Pest) is the gate before every commit/merge.
 
 ## 11. Stack
-Laravel 12 · PHP 8.3 · MySQL 8 · Redis · Horizon · Pest · spatie/laravel-data · phpseclib (signing) · dompdf (PDF) · endroid/qr-code · Larastan · Pint. Webhook delivery is a custom in-repo job (`App\Jobs\DeliverWebhook`, §7.2), not a package. Repo: this folder (`billplz/einvoice-engine`), single app.
+Laravel 12 · PHP 8.3 · MySQL 8 · Redis · Horizon · Pest · spatie/laravel-data · ext-openssl + brick/math (signing) · dompdf (PDF) · endroid/qr-code · Larastan · Pint. Webhook delivery is a custom in-repo job (`App\Jobs\DeliverWebhook`, §7.2), not a package. Repo: this folder (`billplz/einvoice-engine`), single app.
 
 ## 12. Decisions log
 | Decision | Choice | Why |

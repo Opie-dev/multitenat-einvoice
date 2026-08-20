@@ -3,6 +3,7 @@
 namespace App\Actions\Consolidation;
 
 use App\Actions\Documents\CreateDocument;
+use App\Actions\Documents\SubmitDocument;
 use App\Data\Requests\Documents\CreateDocumentData;
 use App\Domain\Documents\DocumentStateMachine;
 use App\Domain\Documents\Money;
@@ -21,8 +22,10 @@ use Throwable;
  * the parent they were reported under.
  *
  * The parent is created through the ordinary CreateDocument path, so it is
- * validated, totalled, queued and submitted exactly like any other invoice. Its
- * natural key is generation-suffixed: the first attempt at a month is `{base}`,
+ * validated and totalled exactly like any other invoice — but it is created
+ * unsubmitted and only released (through SubmitDocument) once every receipt is
+ * linked to it, so a rejection can never arrive while children are still
+ * unlinked and strand them. Its natural key is generation-suffixed: the first attempt at a month is `{base}`,
  * and each parent LHDN rejects is superseded by `{base}-r{n+1}` rather than
  * replayed. A parent that has not been rejected keeps its key, so an unchanged
  * re-run of the same month is an idempotent replay.
@@ -46,6 +49,7 @@ class ConsolidateIssuerMonth
 
     public function __construct(
         private readonly CreateDocument $create,
+        private readonly SubmitDocument $submit,
         private readonly DocumentStateMachine $stateMachine,
     ) {}
 
@@ -140,7 +144,10 @@ class ConsolidateIssuerMonth
             'lines' => $this->lines($group['codes']),
             'source' => ['system' => self::SOURCE_SYSTEM, 'ref' => $this->sourceRef($issuer, $month, $currency)],
             'consolidate' => false,
-            'submit' => true,
+            // Created but not released: the parent must not reach LHDN — and so must
+            // not be able to come back rejected — until every receipt it reports is
+            // linked to it. See the release below.
+            'submit' => false,
             'metadata' => ['consolidation' => ['month' => $month->format('Y-m'), 'children' => count($group['ids'])]],
         ]);
 
@@ -154,7 +161,13 @@ class ConsolidateIssuerMonth
             }
         }
 
-        return $parent;
+        // Every child is now attached, so a rejection can release all of them. A
+        // replayed parent that has already moved past `validated` (queued, submitted,
+        // valid, or held because the issuer cannot submit) is left exactly as it is:
+        // SubmitDocument would either re-queue an in-flight document or refuse it.
+        return $parent->status === DocumentStatus::Validated
+            ? $this->submit->handle($parent)
+            : $parent;
     }
 
     /**

@@ -75,7 +75,8 @@ Events: `document.validated`, `document.held`, `document.queued`,
 Every delivery is a `POST` with header `X-Einvoice-Event: <event>` and
 `X-Einvoice-Signature: <hex hmac-sha256>` computed over the exact request
 body. Failed deliveries retry along `[60, 300, 1800, 7200, 21600, 86400]`
-seconds (about a day total) before the delivery is marked `exhausted`;
+seconds (the final retry lands about a day after the first attempt) before the
+delivery is marked `exhausted`;
 `webhook_deliveries.status`/`attempt`/`next_retry_at` track progress and
 `GET /v1/webhooks/{id}/deliveries` lists the history.
 
