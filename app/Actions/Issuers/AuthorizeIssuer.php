@@ -4,6 +4,7 @@ namespace App\Actions\Issuers;
 
 use App\Enums\IssuerStatus;
 use App\Enums\LhdnMode;
+use App\Events\IssuerStatusChanged;
 use App\Exceptions\ProblemException;
 use App\Lhdn\LhdnClientFactory;
 use App\Lhdn\LhdnErrorKind;
@@ -29,12 +30,18 @@ class AuthorizeIssuer
             }
             throw $e;
         }
+        $from = $issuer->status;
         $issuer->authorized_at = now();
         if (in_array($issuer->status, [IssuerStatus::Draft, IssuerStatus::TinVerified], true)) {
             $issuer->status = IssuerStatus::Authorized;
         }
         $issuer->save();
+        if ($issuer->status !== $from) {
+            IssuerStatusChanged::dispatch($issuer, $from, $issuer->status);
+        }
         $issuer->secret?->forceFill(['credentials_verified_at' => now()])->save();
+        // May advance the status further (authorized -> active, if a certificate is
+        // already on file); that transition dispatches its own IssuerStatusChanged.
         $this->activator->apply($issuer);
         $this->audit->record('issuer.authorized', $issuer, ['lhdn_mode' => $issuer->lhdn_mode->value, 'status' => $issuer->status->value]);
 

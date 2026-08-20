@@ -5,6 +5,7 @@ namespace App\Actions\Documents;
 use App\Data\Requests\Documents\CreateDocumentData;
 use App\Data\Requests\Documents\DocumentLineData;
 use App\Domain\Documents\Money;
+use App\Enums\DocumentType;
 use App\Models\Document;
 use App\Models\Issuer;
 use Illuminate\Validation\ValidationException;
@@ -35,7 +36,11 @@ class DocumentSemanticValidator
         }
 
         if ($data->consolidate) {
-            if (! $data->buyer->general_public) {
+            // A note nets against an invoice; pooled as a positive consolidated line it
+            // would overstate the month's takings, so it never enters the pool.
+            if ($data->type !== DocumentType::Invoice) {
+                $errors['consolidate'] = 'Only invoices can be consolidated.';
+            } elseif (! $data->buyer->general_public) {
                 $errors['consolidate'] = 'Only general-public (B2C) documents can be consolidated.';
             } elseif (! $issuer->consolidation_enabled) {
                 $errors['consolidate'] = 'Consolidation is not enabled for this issuer.';

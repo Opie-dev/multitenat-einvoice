@@ -4,6 +4,7 @@ use App\Http\Controllers\Api\V1\ApiKeyController;
 use App\Http\Controllers\Api\V1\BuyerController;
 use App\Http\Controllers\Api\V1\DocumentBatchController;
 use App\Http\Controllers\Api\V1\DocumentController;
+use App\Http\Controllers\Api\V1\DocumentPdfController;
 use App\Http\Controllers\Api\V1\IssuerCertificateController;
 use App\Http\Controllers\Api\V1\IssuerController;
 use App\Http\Controllers\Api\V1\IssuerCredentialsController;
@@ -12,6 +13,8 @@ use App\Http\Controllers\Api\V1\MeController;
 use App\Http\Controllers\Api\V1\ReferenceController;
 use App\Http\Controllers\Api\V1\TenantController;
 use App\Http\Controllers\Api\V1\TinController;
+use App\Http\Controllers\Api\V1\WebhookDeliveryController;
+use App\Http\Controllers\Api\V1\WebhookEndpointController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/health', fn () => response()->json(['status' => 'ok']))->name('health');
@@ -27,6 +30,17 @@ Route::middleware('auth.api')->group(function () {
             Route::get('/api-keys', [ApiKeyController::class, 'index']);
             Route::post('/api-keys', [ApiKeyController::class, 'store']);
             Route::delete('/api-keys/{apiKey}', [ApiKeyController::class, 'destroy']);
+        });
+
+        Route::middleware('ability:webhooks:manage')->group(function () {
+            Route::get('/webhooks', [WebhookEndpointController::class, 'index']);
+            Route::post('/webhooks', [WebhookEndpointController::class, 'store']);
+            Route::get('/webhooks/{webhookEndpoint}', [WebhookEndpointController::class, 'show']);
+            Route::patch('/webhooks/{webhookEndpoint}', [WebhookEndpointController::class, 'update']);
+            Route::delete('/webhooks/{webhookEndpoint}', [WebhookEndpointController::class, 'destroy']);
+            Route::get('/webhooks/{webhookEndpoint}/deliveries', [WebhookEndpointController::class, 'deliveries']);
+            Route::post('/webhooks/{webhookEndpoint}/test', [WebhookDeliveryController::class, 'test']);
+            Route::post('/webhook-deliveries/{webhookDelivery}/redeliver', [WebhookDeliveryController::class, 'redeliver']);
         });
 
         Route::middleware('ability:read')->group(function () {
@@ -56,6 +70,7 @@ Route::middleware('auth.api')->group(function () {
             Route::get('/documents', [DocumentController::class, 'index']);
             Route::get('/documents/{document}', [DocumentController::class, 'show']);
             Route::get('/documents/{document}/events', [DocumentController::class, 'events']);
+            Route::get('/documents/{document}/pdf', [DocumentPdfController::class, 'show']);
         });
         Route::middleware('ability:documents:write')->group(function () {
             Route::post('/documents', [DocumentController::class, 'store'])->middleware('idempotency');

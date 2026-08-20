@@ -101,6 +101,17 @@ it('routes consolidated B2C documents to awaiting_consolidation and rejects cons
         ->toThrow(fn (ValidationException $e) => expect($e->errors())->toHaveKey('consolidate'));
 });
 
+it('rejects consolidation for anything but an invoice', function () {
+    $issuer = Issuer::factory()->for($this->tenant)->active()->create(['consolidation_enabled' => true]);
+    $original = $this->create->handle(CreateDocumentData::from(docPayload($issuer)))->document;
+
+    expect(fn () => $this->create->handle(CreateDocumentData::from(docPayload($issuer, [
+        'type' => 'credit_note',
+        'consolidate' => true,
+        'original_document_ref' => ['document_id' => $original->id],
+    ]))))->toThrow(fn (ValidationException $e) => expect($e->errors()['consolidate'][0])->toBe('Only invoices can be consolidated.'));
+});
+
 it('rejects consolidation when the issuer has it disabled', function () {
     expect(fn () => $this->create->handle(CreateDocumentData::from(docPayload($this->issuer, ['consolidate' => true]))))
         ->toThrow(fn (ValidationException $e) => expect($e->errors()['consolidate'][0])->toContain('not enabled'));

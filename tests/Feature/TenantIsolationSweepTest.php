@@ -6,6 +6,8 @@ use App\Models\Buyer;
 use App\Models\Document;
 use App\Models\Issuer;
 use App\Models\Tenant;
+use App\Models\WebhookDelivery;
+use App\Models\WebhookEndpoint;
 use App\Tenancy\TenantContext;
 
 /**
@@ -52,6 +54,15 @@ dataset('cross_tenant_routes', function () {
         'document events' => [fn (Tenant $t) => documentFor($t), 'GET', '/v1/documents/{id}/events'],
         'document submit' => [fn (Tenant $t) => documentFor($t), 'POST', '/v1/documents/{id}/submit'],
         'document cancel' => [fn (Tenant $t) => validDocumentFor($t), 'POST', '/v1/documents/{id}/cancel'],
+        'document pdf' => [fn (Tenant $t) => validDocumentFor($t), 'GET', '/v1/documents/{id}/pdf'],
+        'webhook show' => [fn (Tenant $t) => WebhookEndpoint::factory()->for($t)->create(['environment' => Environment::Sandbox]), 'GET', '/v1/webhooks/{id}'],
+        'webhook update' => [fn (Tenant $t) => WebhookEndpoint::factory()->for($t)->create(['environment' => Environment::Sandbox]), 'PATCH', '/v1/webhooks/{id}'],
+        'webhook delete' => [fn (Tenant $t) => WebhookEndpoint::factory()->for($t)->create(['environment' => Environment::Sandbox]), 'DELETE', '/v1/webhooks/{id}'],
+        'webhook deliveries' => [fn (Tenant $t) => WebhookEndpoint::factory()->for($t)->create(['environment' => Environment::Sandbox]), 'GET', '/v1/webhooks/{id}/deliveries'],
+        'webhook test' => [fn (Tenant $t) => WebhookEndpoint::factory()->for($t)->create(['environment' => Environment::Sandbox]), 'POST', '/v1/webhooks/{id}/test'],
+        'webhook delivery redeliver' => [fn (Tenant $t) => WebhookDelivery::factory()->for($t)->create([
+            'webhook_endpoint_id' => WebhookEndpoint::factory()->for($t)->create(['environment' => Environment::Sandbox])->id,
+        ]), 'POST', '/v1/webhook-deliveries/{id}/redeliver'],
     ];
 });
 
@@ -79,6 +90,13 @@ dataset('cross_environment_routes', function () {
         'document events (prod doc, test key)' => [fn (Tenant $t) => documentFor($t, Environment::Production), 'GET', '/v1/documents/{id}/events'],
         'document submit (prod doc, test key)' => [fn (Tenant $t) => documentFor($t, Environment::Production), 'POST', '/v1/documents/{id}/submit'],
         'document cancel (prod doc, test key)' => [fn (Tenant $t) => validDocumentFor($t, Environment::Production), 'POST', '/v1/documents/{id}/cancel'],
+        'document pdf (prod doc, test key)' => [fn (Tenant $t) => validDocumentFor($t, Environment::Production), 'GET', '/v1/documents/{id}/pdf'],
+        'webhook show (prod webhook, test key)' => [fn (Tenant $t) => WebhookEndpoint::factory()->for($t)->create(['environment' => Environment::Production]), 'GET', '/v1/webhooks/{id}'],
+        'webhook deliveries (prod webhook, test key)' => [fn (Tenant $t) => WebhookEndpoint::factory()->for($t)->create(['environment' => Environment::Production]), 'GET', '/v1/webhooks/{id}/deliveries'],
+        'webhook test (prod webhook, test key)' => [fn (Tenant $t) => WebhookEndpoint::factory()->for($t)->create(['environment' => Environment::Production]), 'POST', '/v1/webhooks/{id}/test'],
+        'webhook delivery redeliver' => [fn (Tenant $t) => WebhookDelivery::factory()->for($t)->create([
+            'webhook_endpoint_id' => WebhookEndpoint::factory()->for($t)->create(['environment' => Environment::Production])->id,
+        ]), 'POST', '/v1/webhook-deliveries/{id}/redeliver'],
     ];
 });
 
@@ -99,8 +117,9 @@ it('lists are empty for another tenant', function () {
     Buyer::factory()->for($owner)->create();
     ApiKey::generate($owner, 'k', Environment::Sandbox, ['read']);
     documentFor($owner);
+    WebhookEndpoint::factory()->for($owner)->create(['environment' => Environment::Sandbox]);
 
-    foreach (['/v1/issuers', '/v1/buyers', '/v1/api-keys', '/v1/documents'] as $path) {
+    foreach (['/v1/issuers', '/v1/buyers', '/v1/api-keys', '/v1/documents', '/v1/webhooks'] as $path) {
         $this->withHeaders(serviceHeaders($intruder, 'sandbox'))->getJson($path)->assertOk()->assertJsonCount(0, 'data');
     }
 });

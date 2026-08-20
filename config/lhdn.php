@@ -39,4 +39,14 @@ return [
     ],
 
     'poll' => ['backoff_seconds' => [5, 15, 30, 60, 120, 300, 600, 1800, 3600]],
+
+    'status_refresh' => [
+        'max_age_days' => (int) env('LHDN_STATUS_REFRESH_MAX_AGE_DAYS', 7),
+        'interval_hours' => (int) env('LHDN_STATUS_REFRESH_INTERVAL_HOURS', 6),
+    ],
+
+    'duplicate_rejection_codes' => ['DUPLICATE_SUBMISSION'],
+
+    // ~7 years, per the LHDN record-keeping requirement (spec §7.5).
+    'attempts_retention_days' => (int) env('LHDN_ATTEMPTS_RETENTION_DAYS', 2555),
 ];
