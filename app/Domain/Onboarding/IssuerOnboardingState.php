@@ -42,6 +42,16 @@ final class IssuerOnboardingState
         'country_code', 'email', 'phone',
     ];
 
+    /**
+     * Per-instance memo of siblingFor(), keyed by Environment::value. An
+     * instance is scoped to one issuer (and thus one tin/tenant), so caching
+     * the sandbox/production rows here for its lifetime is safe — steps()
+     * and goLive() both need them and must not issue duplicate queries.
+     *
+     * @var array<string, ?Issuer>
+     */
+    private array $siblingCache = [];
+
     private function __construct(
         private readonly Issuer $issuer,
         private readonly Environment $env,
@@ -57,20 +67,21 @@ final class IssuerOnboardingState
     {
         $viewed = $this->siblingFor($this->env);
         $sandbox = $this->siblingFor(Environment::Sandbox);
+        $production = $this->siblingFor(Environment::Production);
 
         $profile = $viewed !== null && $this->profileDone($viewed);
         $tin = $viewed !== null && $this->tinDone($viewed);
         $mode = $viewed !== null && $this->modeDone($viewed);
         $certificate = $viewed !== null && $this->certificateDone($viewed);
-        $sandboxTest = $sandbox !== null && $this->sandboxTestDone($sandbox);
-        [$goLive, $blockedReason] = $this->goLive();
+        $sandboxTestDone = $sandbox !== null && $this->sandboxTestDone($sandbox);
+        [$goLive, $blockedReason] = $this->goLive($sandbox, $production, $sandboxTestDone);
 
         return [
             new StepState('profile', $profile),
             new StepState('tin', $tin),
             new StepState('mode', $mode),
             new StepState('certificate', $certificate),
-            new StepState('sandbox_test', $sandboxTest),
+            new StepState('sandbox_test', $sandboxTestDone),
             new StepState('go_live', $goLive, $blockedReason),
         ];
     }
@@ -129,12 +140,15 @@ final class IssuerOnboardingState
             ->exists();
     }
 
-    /** @return array{0: bool, 1: ?string} */
-    private function goLive(): array
+    /**
+     * Takes the already-resolved sandbox/production siblings and the
+     * already-computed sandbox_test result — steps() has computed all three
+     * once, and go-live readiness must not re-derive them.
+     *
+     * @return array{0: bool, 1: ?string}
+     */
+    private function goLive(?Issuer $sandbox, ?Issuer $production, bool $sandboxTestDone): array
     {
-        $sandbox = $this->siblingFor(Environment::Sandbox);
-        $production = $this->siblingFor(Environment::Production);
-
         if ($production !== null && $production->status === IssuerStatus::Active) {
             return [true, null];
         }
@@ -144,7 +158,7 @@ final class IssuerOnboardingState
             ! $this->tinDone($sandbox) => 'tin_not_verified',
             ! $this->modeDone($sandbox) => 'mode_incomplete',
             ! $this->certificateDone($sandbox) => 'certificate_missing',
-            ! $this->sandboxTestDone($sandbox) => 'sandbox_test_pending',
+            ! $sandboxTestDone => 'sandbox_test_pending',
             $production === null || ! $this->modeDone($production) => 'production_mode_incomplete',
             ! $this->certificateDone($production) => 'production_certificate_missing',
             default => null,
@@ -153,16 +167,22 @@ final class IssuerOnboardingState
         return [false, $reason];
     }
 
-    /** The issuer row for $env: $issuer itself when it already lives there, otherwise its same-tin sibling. */
+    /**
+     * The issuer row for $env: $issuer itself when it already lives there,
+     * otherwise its same-tin sibling — memoized per instance so steps() and
+     * goLive() never issue the same lookup twice.
+     */
     private function siblingFor(Environment $env): ?Issuer
     {
-        if ($this->issuer->environment === $env) {
-            return $this->issuer;
+        $key = $env->value;
+        if (array_key_exists($key, $this->siblingCache)) {
+            return $this->siblingCache[$key];
         }
 
-        return Issuer::query()
-            ->where('tin', $this->issuer->tin)
-            ->where('environment', $env)
-            ->first();
+        $sibling = $this->issuer->environment === $env
+            ? $this->issuer
+            : Issuer::query()->where('tin', $this->issuer->tin)->where('environment', $env)->first();
+
+        return $this->siblingCache[$key] = $sibling;
     }
 }
