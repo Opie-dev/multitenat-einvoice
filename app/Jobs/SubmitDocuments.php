@@ -213,7 +213,8 @@ class SubmitDocuments implements ShouldQueue
     /** @param array{code: string, message: string} $rejection */
     private function isDuplicateRejection(array $rejection): bool
     {
-        return in_array($rejection['code'], (array) config('lhdn.duplicate_rejection_codes', []), true);
+        return in_array($rejection['code'], (array) config('lhdn.duplicate_rejection_codes', []), true)
+            || preg_match('/duplicat/i', $rejection['message']) === 1;
     }
 
     /**
@@ -241,6 +242,9 @@ class SubmitDocuments implements ShouldQueue
             foreach ($accepted as $entry) {
                 if (! is_array($entry) || ($entry['invoiceCodeNumber'] ?? null) !== $internalId) {
                     continue;
+                }
+                if (! isset($entry['uuid']) || ! is_string($entry['uuid']) || $entry['uuid'] === '') {
+                    continue; // codeNumber matches but the attempt never recorded a uuid; keep looking
                 }
 
                 $document->forceFill([
