@@ -10,6 +10,7 @@ use App\Lhdn\LhdnDriverGuard;
 use App\Listeners\DispatchDocumentWebhooks;
 use App\Listeners\DispatchIssuerWebhooks;
 use App\Listeners\PrepareDocumentOnQueued;
+use App\Listeners\ReleaseChildrenOnConsolidationFailure;
 use App\Listeners\ReleaseHeldDocumentsOnActivation;
 use App\Tenancy\TenantContext;
 use Illuminate\Cache\RateLimiting\Limit;
@@ -51,6 +52,7 @@ class AppServiceProvider extends ServiceProvider
         // later transition's webhook, scrambling delivery order for the caller.
         Event::listen(DocumentTransitioned::class, DispatchDocumentWebhooks::class);
         Event::listen(DocumentTransitioned::class, PrepareDocumentOnQueued::class);
+        Event::listen(DocumentTransitioned::class, ReleaseChildrenOnConsolidationFailure::class);
         Event::listen(IssuerActivated::class, ReleaseHeldDocumentsOnActivation::class);
         Event::listen(IssuerStatusChanged::class, DispatchIssuerWebhooks::class);
     }
