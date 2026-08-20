@@ -6,6 +6,7 @@ use App\Models\Buyer;
 use App\Models\Document;
 use App\Models\Issuer;
 use App\Models\Tenant;
+use App\Models\WebhookDelivery;
 use App\Models\WebhookEndpoint;
 use App\Tenancy\TenantContext;
 
@@ -57,6 +58,10 @@ dataset('cross_tenant_routes', function () {
         'webhook update' => [fn (Tenant $t) => WebhookEndpoint::factory()->for($t)->create(['environment' => Environment::Sandbox]), 'PATCH', '/v1/webhooks/{id}'],
         'webhook delete' => [fn (Tenant $t) => WebhookEndpoint::factory()->for($t)->create(['environment' => Environment::Sandbox]), 'DELETE', '/v1/webhooks/{id}'],
         'webhook deliveries' => [fn (Tenant $t) => WebhookEndpoint::factory()->for($t)->create(['environment' => Environment::Sandbox]), 'GET', '/v1/webhooks/{id}/deliveries'],
+        'webhook test' => [fn (Tenant $t) => WebhookEndpoint::factory()->for($t)->create(['environment' => Environment::Sandbox]), 'POST', '/v1/webhooks/{id}/test'],
+        'webhook delivery redeliver' => [fn (Tenant $t) => WebhookDelivery::factory()->for($t)->create([
+            'webhook_endpoint_id' => WebhookEndpoint::factory()->for($t)->create(['environment' => Environment::Sandbox])->id,
+        ]), 'POST', '/v1/webhook-deliveries/{id}/redeliver'],
     ];
 });
 
@@ -86,6 +91,7 @@ dataset('cross_environment_routes', function () {
         'document cancel (prod doc, test key)' => [fn (Tenant $t) => validDocumentFor($t, Environment::Production), 'POST', '/v1/documents/{id}/cancel'],
         'webhook show (prod webhook, test key)' => [fn (Tenant $t) => WebhookEndpoint::factory()->for($t)->create(['environment' => Environment::Production]), 'GET', '/v1/webhooks/{id}'],
         'webhook deliveries (prod webhook, test key)' => [fn (Tenant $t) => WebhookEndpoint::factory()->for($t)->create(['environment' => Environment::Production]), 'GET', '/v1/webhooks/{id}/deliveries'],
+        'webhook test (prod webhook, test key)' => [fn (Tenant $t) => WebhookEndpoint::factory()->for($t)->create(['environment' => Environment::Production]), 'POST', '/v1/webhooks/{id}/test'],
     ];
 });
 
