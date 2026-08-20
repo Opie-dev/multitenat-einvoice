@@ -53,6 +53,7 @@ dataset('cross_tenant_routes', function () {
         'document events' => [fn (Tenant $t) => documentFor($t), 'GET', '/v1/documents/{id}/events'],
         'document submit' => [fn (Tenant $t) => documentFor($t), 'POST', '/v1/documents/{id}/submit'],
         'document cancel' => [fn (Tenant $t) => validDocumentFor($t), 'POST', '/v1/documents/{id}/cancel'],
+        'document pdf' => [fn (Tenant $t) => validDocumentFor($t), 'GET', '/v1/documents/{id}/pdf'],
         'webhook show' => [fn (Tenant $t) => WebhookEndpoint::factory()->for($t)->create(['environment' => Environment::Sandbox]), 'GET', '/v1/webhooks/{id}'],
         'webhook update' => [fn (Tenant $t) => WebhookEndpoint::factory()->for($t)->create(['environment' => Environment::Sandbox]), 'PATCH', '/v1/webhooks/{id}'],
         'webhook delete' => [fn (Tenant $t) => WebhookEndpoint::factory()->for($t)->create(['environment' => Environment::Sandbox]), 'DELETE', '/v1/webhooks/{id}'],
@@ -84,6 +85,7 @@ dataset('cross_environment_routes', function () {
         'document events (prod doc, test key)' => [fn (Tenant $t) => documentFor($t, Environment::Production), 'GET', '/v1/documents/{id}/events'],
         'document submit (prod doc, test key)' => [fn (Tenant $t) => documentFor($t, Environment::Production), 'POST', '/v1/documents/{id}/submit'],
         'document cancel (prod doc, test key)' => [fn (Tenant $t) => validDocumentFor($t, Environment::Production), 'POST', '/v1/documents/{id}/cancel'],
+        'document pdf (prod doc, test key)' => [fn (Tenant $t) => validDocumentFor($t, Environment::Production), 'GET', '/v1/documents/{id}/pdf'],
         'webhook show (prod webhook, test key)' => [fn (Tenant $t) => WebhookEndpoint::factory()->for($t)->create(['environment' => Environment::Production]), 'GET', '/v1/webhooks/{id}'],
         'webhook deliveries (prod webhook, test key)' => [fn (Tenant $t) => WebhookEndpoint::factory()->for($t)->create(['environment' => Environment::Production]), 'GET', '/v1/webhooks/{id}/deliveries'],
     ];
