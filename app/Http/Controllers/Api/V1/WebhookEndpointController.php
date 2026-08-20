@@ -2,16 +2,16 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Actions\Webhooks\CreateWebhookEndpoint;
+use App\Actions\Webhooks\DeleteWebhookEndpoint;
+use App\Actions\Webhooks\UpdateWebhookEndpoint;
 use App\Data\Requests\Webhooks\CreateWebhookEndpointData;
 use App\Data\Requests\Webhooks\UpdateWebhookEndpointData;
 use App\Data\Resources\WebhookDeliveryData;
 use App\Data\Resources\WebhookEndpointData;
 use App\Http\Controllers\Controller;
 use App\Models\WebhookEndpoint;
-use App\Services\Audit\AuditLogger;
-use App\Tenancy\TenantContext;
 use Illuminate\Http\Response;
-use Illuminate\Support\Str;
 use Spatie\LaravelData\CursorPaginatedDataCollection;
 
 class WebhookEndpointController extends Controller
@@ -25,16 +25,9 @@ class WebhookEndpointController extends Controller
         );
     }
 
-    public function store(CreateWebhookEndpointData $data, TenantContext $context, AuditLogger $audit): WebhookEndpointData
+    public function store(CreateWebhookEndpointData $data, CreateWebhookEndpoint $action): WebhookEndpointData
     {
-        $secret = 'whsec_'.Str::random(40);
-
-        $endpoint = WebhookEndpoint::create($data->toArray() + [
-            'environment' => $context->environment(),
-            'secret' => $secret,
-        ]);
-
-        $audit->record('webhook.created', $endpoint, ['url' => $endpoint->url, 'events' => $endpoint->events]);
+        ['endpoint' => $endpoint, 'secret' => $secret] = $action->handle($data);
 
         return WebhookEndpointData::fromModel($endpoint)->withSecret($secret)->wrap('data');
     }
@@ -44,25 +37,14 @@ class WebhookEndpointController extends Controller
         return WebhookEndpointData::fromModel($webhookEndpoint)->wrap('data');
     }
 
-    public function update(UpdateWebhookEndpointData $data, WebhookEndpoint $webhookEndpoint, AuditLogger $audit): WebhookEndpointData
+    public function update(UpdateWebhookEndpointData $data, WebhookEndpoint $webhookEndpoint, UpdateWebhookEndpoint $action): WebhookEndpointData
     {
-        // Captured before update(): Model::save() syncs the original attributes
-        // to the new values before update() returns, so getOriginal() must be
-        // snapshotted here to recover the pre-update "from" values for the diff.
-        $original = $webhookEndpoint->getOriginal();
-
-        $webhookEndpoint->update($data->toArray());
-
-        $audit->record('webhook.updated', $webhookEndpoint, AuditLogger::diff($webhookEndpoint, $original));
-
-        return WebhookEndpointData::fromModel($webhookEndpoint->refresh())->wrap('data');
+        return WebhookEndpointData::fromModel($action->handle($webhookEndpoint, $data))->wrap('data');
     }
 
-    public function destroy(WebhookEndpoint $webhookEndpoint, AuditLogger $audit): Response
+    public function destroy(WebhookEndpoint $webhookEndpoint, DeleteWebhookEndpoint $action): Response
     {
-        $audit->record('webhook.deleted', $webhookEndpoint);
-
-        $webhookEndpoint->delete();
+        $action->handle($webhookEndpoint);
 
         return response()->noContent();
     }
