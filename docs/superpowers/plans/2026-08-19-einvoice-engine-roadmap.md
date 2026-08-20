@@ -68,3 +68,24 @@ Final-fix-wave rulings worth remembering: a failed `getSubmission` read is never
 - `ValidateTin` caches before resolving the issuer, so the cache key does not distinguish the resolved environment in every path.
 - `LhdnDriverGuard` covers `LHDN_DRIVER=fake` in production; consider the same guard for missing intermediary credentials.
 - Spec §6.1/§6.2 wording drift was corrected in Plan 3; check §6.3–§6.5 against the built pipeline when Plan 4 starts.
+
+## Plan 4 outcome (2026-08-20)
+
+Branch `plan-4-consolidation` (merged to master fb64fca): 7 tasks + final fix wave; 327 Pest tests / 1186 assertions (+3 opt-in sandbox tests skipped), PHPStan level 8, Pint clean. New deps: `dompdf/dompdf` ^3.1, `endroid/qr-code` ^6.1.
+
+Shipped: `RefreshDocumentStatus` job — post-`valid` buyer rejection and portal cancellation detected via `applyLhdnVerdict` (LHDN-authoritative whitelist on the state machine), `documents.lhdn_refreshed_at`; duplicate-`codeNumber` recovery in `SubmitDocuments` (adopts the prior UUID via `submission_attempts` instead of marking `invalid`); tenant webhooks — `webhook_endpoints`/`webhook_deliveries`, CRUD + test + redeliver endpoints, custom tenant-aware `DeliverWebhook` job (HMAC-SHA256 `X-Einvoice-Signature` over the exact sent bytes, retry curve [60,300,1800,7200,21600,86400], never follows redirects), `PublicHttpsUrl` SSRF guard on endpoint URLs, 13 `WebhookEvent`s incl. `document.consolidation_failed`; monthly B2C consolidation — `einvoice:consolidate` (daily 01:00 KL) per issuer×currency×month, one line per classification code (tax type `06`), generation-suffixed natural key `cons-{issuer}-{YYYY-MM}-{ccy}[-rN]` so a rejected parent is superseded, never resubmitted; children link **before** the parent is submitted; `ReleaseChildrenOnConsolidationFailure` releases children + fires per-child webhooks on parent `invalid`; invoice PDFs with LHDN QR validation link, lazy-cached at `documents/pdf/{tenant}/{id}.pdf`, 409 `pdf_not_available` for non-valid docs; certificate lifecycle — `einvoice:monitor-certificates` (daily 02:00 KL) with 30/7/1-day `certificate.expiring` notices (`issuer_secrets.expiry_notified_at_days`, at-most-once), expiry → suspension + `HoldDocumentsOnSuspension` holds `queued` docs; `einvoice:prune-attempts` (daily 03:30 KL) retention sweep.
+
+Spec amended: §5.6 (generation keys, invoice-only pool, exchange rate from last child receipt, skip alarm runbook), §6.5 (refresh job, duplicate recovery), §7.2 (custom delivery job replaces spatie/laravel-webhook-server; `consolidation_failed` event), §7.3 (lazy PDF), §7.4 (as-built holds), §11 (`ext-openssl + brick/math (signing)`).
+
+Final-review rulings worth remembering: consolidation parents are created `submit=false` and released via `SubmitDocument` only after every child is linked; consolidation/monitor sweeps isolate per-issuer failures (`consolidation.skipped` / `certificate.monitor_skipped` Log::error + non-zero exit); webhook redeliver is environment-scoped through the endpoint; `DeliverWebhook` names its bookkeeping `recordFailure()` because `fail()` would shadow `InteractsWithQueue::fail()`.
+
+### Backlog carried into Plan 5+
+- **Webhook delivery resumption sweep** — `DeliverWebhook` is `tries=1` with no `failed()` handler; a lost job strands the row at `pending`/`retrying` forever. The `(status, next_retry_at)` index exists but nothing reads it; add a sweep (or fold into `einvoice:lhdn-dispatch` cadence).
+- `DispatchDocumentWebhooks::EVENT_NAMES` duplicates `WebhookEvent` cases — map to the enum (single vocabulary).
+- `DocumentPdfController` uses `Storage::disk('local')->path()` — breaks if the disk is remapped to S3; use a streamed response.
+- `documents.consolidated_into_id` has no index; the release listener now early-returns on `source_system`, so low priority — add `(tenant_id, consolidated_into_id)` when convenient.
+- DNS rebinding residual on webhook URLs (validated at save time, resolved again at delivery) — accepted; re-check at delivery time if it ever matters.
+- `ConsolidateIssuerMonth` currency loop aborts remaining currencies for that issuer on failure — a per-currency `continue` would be more resilient (loudly alarmed today).
+- Late/leftover receipts against a **non-invalid** parent are a hard stop (payload-hash conflict) needing operator action — runbook'd in §5.6.
+- `IssuerStatusChanged` carries no reason; `HoldDocumentsOnSuspension` holds on every suspension (only trigger today is cert lapse) — add a reason enum if new suspension causes appear.
+- Plan 3 backlog still open: UBL `TaxSubtotal` exemption grouping, buyer `TTX`, `validateTin` 400 handling, `Retry-After` honouring, `TokenProvider` lock TTL, breaker atomicity, `ValidateTin` cache env key, credentials guard.
