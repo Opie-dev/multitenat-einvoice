@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Actions\Consolidation\ConsolidateIssuerMonth;
+use App\Actions\Consolidation\ConsolidationFailed;
 use App\Auth\Actor;
 use App\Enums\Environment;
 use App\Enums\IssuerStatus;
@@ -11,6 +12,7 @@ use App\Models\Tenant;
 use App\Tenancy\TenantContext;
 use Carbon\CarbonImmutable;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\LazyCollection;
 use Throwable;
 
@@ -37,6 +39,7 @@ class ConsolidateDocuments extends Command
 
         $parents = 0;
         $consolidated = 0;
+        $skipped = 0;
         $callerTenant = $context->tenantOrNull();
         $callerActor = $context->actor();
         $callerEnvironment = $context->environment();
@@ -48,15 +51,23 @@ class ConsolidateDocuments extends Command
 
                     try {
                         foreach ($this->issuers($environment) as $issuer) {
-                            // One issuer's bad month must not abort the sweep for everyone else.
+                            // One issuer's bad month must not abort the sweep for everyone
+                            // else — but it must not pass silently either.
                             try {
-                                foreach ($action->handle($issuer, $month) as $parent) {
-                                    $parents++;
-                                    $children = data_get($parent->metadata, 'consolidation.children');
-                                    $consolidated += is_int($children) ? $children : 0;
-                                }
+                                $outcome = $action->handle($issuer, $month);
+                                $parents += count($outcome->parents);
+                                $consolidated += $outcome->childrenConsolidated;
                             } catch (Throwable $e) {
+                                $skipped++;
                                 report($e);
+                                Log::error('consolidation.skipped', [
+                                    'tenant_id' => $tenant->id,
+                                    'issuer_id' => $issuer->id,
+                                    'environment' => $environment->value,
+                                    'month' => $month->format('Y-m'),
+                                    'currency' => $e instanceof ConsolidationFailed ? $e->currency : null,
+                                    'exception' => $e->getMessage(),
+                                ]);
                                 $this->error("Issuer {$issuer->id}: {$e->getMessage()}");
                             }
                         }
@@ -72,6 +83,14 @@ class ConsolidateDocuments extends Command
         }
 
         $this->info("Consolidated {$consolidated} document(s) into {$parents} invoice(s) for {$month->format('Y-m')}.");
+
+        if ($skipped > 0) {
+            // The scheduler only notices a non-zero exit, and a month left
+            // unconsolidated is exactly the thing an operator has to see.
+            $this->error("{$skipped} issuer(s) skipped; see the consolidation.skipped log entries.");
+
+            return self::FAILURE;
+        }
 
         return self::SUCCESS;
     }

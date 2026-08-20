@@ -2,6 +2,7 @@
 
 namespace App\Listeners;
 
+use App\Actions\Consolidation\ConsolidateIssuerMonth;
 use App\Domain\Documents\DocumentStateMachine;
 use App\Enums\DocumentStatus;
 use App\Enums\WebhookEvent;
@@ -28,6 +29,11 @@ class ReleaseChildrenOnConsolidationFailure
     public function handle(DocumentTransitioned $event): void
     {
         if ($event->to !== DocumentStatus::Invalid) {
+            return;
+        }
+        // Only a consolidated parent can fail consolidation. Every other rejected
+        // document skips the children query entirely.
+        if ($event->document->source_system !== ConsolidateIssuerMonth::SOURCE_SYSTEM) {
             return;
         }
 

@@ -1,9 +1,11 @@
 <?php
 
+use App\Actions\Consolidation\ConsolidateIssuerMonth;
 use App\Actions\Documents\CreateDocument;
 use App\Data\Requests\Documents\CreateDocumentData;
 use App\Domain\Documents\DocumentStateMachine;
 use App\Enums\DocumentStatus;
+use App\Enums\DocumentType;
 use App\Enums\Environment;
 use App\Enums\WebhookEvent;
 use App\Jobs\PrepareDocument;
@@ -13,8 +15,10 @@ use App\Models\Tenant;
 use App\Models\WebhookDelivery;
 use App\Models\WebhookEndpoint;
 use App\Tenancy\TenantContext;
+use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Queue;
 
 /** A B2C receipt parked for consolidation, dated inside the month under test. */
@@ -49,9 +53,20 @@ function consolidationChild(Issuer $issuer, string $ref, string $classificationC
 function consolidatedParent(string $currency): Document
 {
     return Document::query()
-        ->where('source_system', 'engine-consolidation')
+        ->where('source_system', ConsolidateIssuerMonth::SOURCE_SYSTEM)
         ->where('currency', $currency)
         ->sole();
+}
+
+/** @return EloquentCollection<int, Document> */
+function consolidatedParents(string $currency): EloquentCollection
+{
+    return Document::query()
+        ->where('source_system', ConsolidateIssuerMonth::SOURCE_SYSTEM)
+        ->where('currency', $currency)
+        ->orderBy('created_at')
+        ->orderBy('id')
+        ->get();
 }
 
 beforeEach(function () {
@@ -138,8 +153,10 @@ it('is a replay on re-run: no second parent, no double-linking', function () {
     Artisan::call('einvoice:consolidate', ['--month' => '2026-07']);
 
     expect(Document::query()->count())->toBe($countAfterFirstRun)
-        ->and(Document::query()->where('source_system', 'engine-consolidation')->count())->toBe(1)
-        ->and(consolidatedParent('MYR')->id)->toBe($parent->id);
+        ->and(Document::query()->where('source_system', ConsolidateIssuerMonth::SOURCE_SYSTEM)->count())->toBe(1)
+        ->and(consolidatedParent('MYR')->id)->toBe($parent->id)
+        // Nothing was eligible, so the run reports nothing — not the parent's stored count.
+        ->and(Artisan::output())->toContain('Consolidated 0 document(s) into 0 invoice(s) for 2026-07.');
 });
 
 it('replays onto the same parent when a previous run linked no children', function () {
@@ -156,7 +173,8 @@ it('replays onto the same parent when a previous run linked no children', functi
 
     Artisan::call('einvoice:consolidate', ['--month' => '2026-07']);
 
-    expect(Document::query()->where('source_system', 'engine-consolidation')->count())->toBe(1);
+    expect(Document::query()->where('source_system', ConsolidateIssuerMonth::SOURCE_SYSTEM)->count())->toBe(1)
+        ->and(Artisan::output())->toContain('Consolidated 2 document(s) into 1 invoice(s) for 2026-07.');
     foreach (Document::query()->where('source_system', 'pos')->get() as $child) {
         expect($child->status)->toBe(DocumentStatus::Consolidated)
             ->and($child->consolidated_into_id)->toBe($parent->id);
@@ -169,7 +187,7 @@ it('leaves issuers without consolidation enabled alone', function () {
 
     Artisan::call('einvoice:consolidate', ['--month' => '2026-07']);
 
-    expect(Document::query()->where('source_system', 'engine-consolidation')->count())->toBe(0)
+    expect(Document::query()->where('source_system', ConsolidateIssuerMonth::SOURCE_SYSTEM)->count())->toBe(0)
         ->and(Document::query()->where('source_ref', 'pos-001')->sole()->status)->toBe(DocumentStatus::AwaitingConsolidation);
 });
 
@@ -188,7 +206,7 @@ it('defaults to the previous month when no --month is given', function () {
 
 it('rejects a malformed --month', function () {
     expect(Artisan::call('einvoice:consolidate', ['--month' => 'July-2026']))->toBe(1);
-    expect(Document::query()->where('source_system', 'engine-consolidation')->count())->toBe(0);
+    expect(Document::query()->where('source_system', ConsolidateIssuerMonth::SOURCE_SYSTEM)->count())->toBe(0);
 });
 
 it('returns children to awaiting_consolidation and fires a webhook when the parent goes invalid', function () {
@@ -227,32 +245,93 @@ it('returns children to awaiting_consolidation and fires a webhook when the pare
     expect($deliveries->first()->payload['data']['status'])->toBe('awaiting_consolidation');
 });
 
-it('re-runs the rejected parent through the pipeline rather than re-linking children to a dead invoice', function () {
+it('supersedes a rejected parent with a new generation instead of replaying onto it', function () {
     consolidationChild($this->issuer, 'pos-001', '022', '10.00', '2026-07-02');
+    $base = "cons-{$this->issuer->id}-2026-07-MYR";
 
     Queue::fake([PrepareDocument::class]);
     Artisan::call('einvoice:consolidate', ['--month' => '2026-07']);
-    $parent = consolidatedParent('MYR');
-    app(DocumentStateMachine::class)->transition($parent, DocumentStatus::Invalid, 'rejected_at_submission');
+    $first = consolidatedParent('MYR');
+    expect($first->source_ref)->toBe($base);
+
+    app(DocumentStateMachine::class)->transition($first, DocumentStatus::Invalid, 'rejected_at_submission');
     expect(Document::query()->where('source_ref', 'pos-001')->sole()->status)->toBe(DocumentStatus::AwaitingConsolidation);
 
-    // The natural key is fixed, so the next run replays onto the same parent: it
-    // has to be queued again, or the receipts would be marked consolidated into an
-    // invoice LHDN will never accept.
+    $this->travel(1)->days();
     Artisan::call('einvoice:consolidate', ['--month' => '2026-07']);
 
-    expect(Document::query()->where('source_system', 'engine-consolidation')->count())->toBe(1)
-        ->and($parent->refresh()->status)->toBe(DocumentStatus::Queued)
-        ->and($parent->events()->get()->last()->reason)->toBe('consolidation_retry')
-        ->and(Document::query()->where('source_ref', 'pos-001')->sole()->status)->toBe(DocumentStatus::Consolidated);
+    $second = consolidatedParents('MYR')->last();
+    expect(consolidatedParents('MYR'))->toHaveCount(2);
+    expect($second->source_ref)->toBe("{$base}-r2")
+        ->and($second->status)->toBe(DocumentStatus::Queued)
+        ->and($second->issue_date->toDateString())->toBe(now('Asia/Kuala_Lumpur')->toDateString())
+        ->and($first->refresh()->status)->toBe(DocumentStatus::Invalid); // superseded, never resubmitted
+
+    $child = Document::query()->where('source_ref', 'pos-001')->sole();
+    expect($child->status)->toBe(DocumentStatus::Consolidated)
+        ->and($child->consolidated_into_id)->toBe($second->id);
+
+    // Generations count numerically, not lexicographically.
+    app(DocumentStateMachine::class)->transition($second, DocumentStatus::Invalid, 'rejected_at_submission');
+    $this->travel(1)->days();
+    Artisan::call('einvoice:consolidate', ['--month' => '2026-07']);
+    expect(consolidatedParents('MYR')->last()->source_ref)->toBe("{$base}-r3");
 });
 
-it('does not release children when an unrelated document goes invalid', function () {
+it('alarms and exits non-zero when an issuer cannot be consolidated', function () {
+    Log::spy();
+    consolidationChild($this->issuer, 'pos-001', '022', '10.00', '2026-07-02');
+    Queue::fake([PrepareDocument::class]);
+    expect(Artisan::call('einvoice:consolidate', ['--month' => '2026-07']))->toBe(0);
+
+    // A receipt arriving after a (non-invalid) parent was built changes the payload
+    // behind an unchanged natural key, which CreateDocument refuses outright.
+    Document::query()->where('source_ref', 'pos-001')->sole()
+        ->forceFill(['status' => DocumentStatus::AwaitingConsolidation, 'consolidated_into_id' => null])->save();
+    consolidationChild($this->issuer, 'pos-002', '022', '5.00', '2026-07-03');
+
+    expect(Artisan::call('einvoice:consolidate', ['--month' => '2026-07']))->toBe(1);
+
+    // report() logs too, so the matcher has to tolerate other error calls.
+    Log::shouldHaveReceived('error')->withArgs(fn (string $message, array $context = []): bool => $message === 'consolidation.skipped'
+        && ($context['issuer_id'] ?? null) === $this->issuer->id
+        && ($context['month'] ?? null) === '2026-07'
+        && ($context['currency'] ?? null) === 'MYR'
+        && str_contains((string) ($context['exception'] ?? ''), 'different payload'));
+});
+
+it('never pools anything but invoices', function () {
+    consolidationChild($this->issuer, 'pos-001', '022', '10.00', '2026-07-02');
+    // A note can no longer be created with consolidate => true, but one parked here
+    // by older data must still never become a positive line on a consolidated invoice.
+    $note = Document::factory()->for($this->issuer)->create([
+        'type' => DocumentType::CreditNote,
+        'status' => DocumentStatus::AwaitingConsolidation,
+        'issue_date' => '2026-07-05',
+        'source_system' => 'pos',
+        'source_ref' => 'pos-cn-1',
+        'total_payable' => '4.00',
+    ]);
+
+    Queue::fake([PrepareDocument::class]);
+    Artisan::call('einvoice:consolidate', ['--month' => '2026-07']);
+
+    expect($note->refresh()->status)->toBe(DocumentStatus::AwaitingConsolidation)
+        ->and($note->consolidated_into_id)->toBeNull()
+        ->and(consolidatedParent('MYR')->metadata['consolidation']['children'])->toBe(1);
+});
+
+it('ignores an invalid document that is not a consolidated parent', function () {
     consolidationChild($this->issuer, 'pos-001', '022', '10.00', '2026-07-02');
     Queue::fake([PrepareDocument::class]);
     Artisan::call('einvoice:consolidate', ['--month' => '2026-07']);
 
-    $unrelated = Document::factory()->for($this->issuer)->queued()->create();
+    // Only a consolidated parent can fail consolidation: a document from any other
+    // source system must never release receipts, whatever points at it.
+    $unrelated = Document::factory()->for($this->issuer)->queued()->create(['source_system' => 'pos']);
+    Document::query()->where('source_ref', 'pos-001')->sole()
+        ->forceFill(['consolidated_into_id' => $unrelated->id])->save();
+
     app(DocumentStateMachine::class)->transition($unrelated, DocumentStatus::Invalid, 'rejected_at_submission');
 
     expect(Document::query()->where('source_ref', 'pos-001')->sole()->status)->toBe(DocumentStatus::Consolidated);
