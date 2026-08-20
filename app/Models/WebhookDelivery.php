@@ -54,4 +54,14 @@ class WebhookDelivery extends Model
     {
         return $this->belongsTo(WebhookEndpoint::class, 'webhook_endpoint_id');
     }
+
+    /**
+     * Deliveries carry no environment column (only their endpoint does), so the
+     * tenant global scope alone is enough to keep this cross-tenant safe; stated
+     * explicitly here rather than relying on Eloquent's implicit default.
+     */
+    public function resolveRouteBinding($value, $field = null): ?Model
+    {
+        return static::query()->where($field ?? $this->getRouteKeyName(), $value)->first();
+    }
 }

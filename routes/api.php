@@ -13,6 +13,7 @@ use App\Http\Controllers\Api\V1\MeController;
 use App\Http\Controllers\Api\V1\ReferenceController;
 use App\Http\Controllers\Api\V1\TenantController;
 use App\Http\Controllers\Api\V1\TinController;
+use App\Http\Controllers\Api\V1\WebhookDeliveryController;
 use App\Http\Controllers\Api\V1\WebhookEndpointController;
 use Illuminate\Support\Facades\Route;
 
@@ -38,6 +39,8 @@ Route::middleware('auth.api')->group(function () {
             Route::patch('/webhooks/{webhookEndpoint}', [WebhookEndpointController::class, 'update']);
             Route::delete('/webhooks/{webhookEndpoint}', [WebhookEndpointController::class, 'destroy']);
             Route::get('/webhooks/{webhookEndpoint}/deliveries', [WebhookEndpointController::class, 'deliveries']);
+            Route::post('/webhooks/{webhookEndpoint}/test', [WebhookDeliveryController::class, 'test']);
+            Route::post('/webhook-deliveries/{webhookDelivery}/redeliver', [WebhookDeliveryController::class, 'redeliver']);
         });
 
         Route::middleware('ability:read')->group(function () {

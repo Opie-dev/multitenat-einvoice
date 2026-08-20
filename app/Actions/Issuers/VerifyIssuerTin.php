@@ -4,6 +4,7 @@ namespace App\Actions\Issuers;
 
 use App\Enums\IssuerStatus;
 use App\Enums\LhdnMode;
+use App\Events\IssuerStatusChanged;
 use App\Exceptions\ProblemException;
 use App\Lhdn\CredentialsResolver;
 use App\Lhdn\LhdnClientFactory;
@@ -35,11 +36,15 @@ class VerifyIssuerTin
         if (! $valid) {
             throw new ProblemException(422, 'Unprocessable Entity', 'LHDN does not recognise this TIN / ID combination.', 'tin_invalid');
         }
+        $from = $issuer->status;
         $issuer->tin_verified_at = now();
         if ($issuer->status === IssuerStatus::Draft) {
             $issuer->status = IssuerStatus::TinVerified;
         }
         $issuer->save();
+        if ($issuer->status !== $from) {
+            IssuerStatusChanged::dispatch($issuer, $from, $issuer->status);
+        }
 
         return $issuer->refresh();
     }
