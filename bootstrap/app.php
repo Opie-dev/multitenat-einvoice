@@ -3,6 +3,7 @@
 use App\Http\Middleware\AuthenticateApi;
 use App\Http\Middleware\EnsureAbility;
 use App\Http\Middleware\EnsureTenantContext;
+use App\Http\Middleware\HandleInertiaRequests;
 use App\Http\Middleware\IdempotencyKey;
 use App\Http\Problem\ProblemResponse;
 use Illuminate\Foundation\Application;
@@ -10,6 +11,8 @@ use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Middleware\SubstituteBindings;
+use Inertia\Inertia;
+use Symfony\Component\HttpFoundation\Response as SymfonyResponse;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -27,6 +30,9 @@ return Application::configure(basePath: dirname(__DIR__))
         // spec 3.3: every /v1 request is throttled per credential (see the
         // 'api' limiter in App\Providers\AppServiceProvider).
         $middleware->throttleApi();
+
+        // Dashboard (Plan 5): shares Inertia props on every web request.
+        $middleware->web(append: [HandleInertiaRequests::class]);
 
         $middleware->alias([
             'auth.api' => AuthenticateApi::class,
@@ -58,5 +64,28 @@ return Application::configure(basePath: dirname(__DIR__))
             }
 
             return null;
+        });
+
+        // Dashboard (Plan 5): 403/404/419/500 render Inertia error pages on
+        // web routes only; /v1 keeps returning problem+json exactly as above.
+        $exceptions->respond(function (SymfonyResponse $response, Throwable $e, Request $request) {
+            if ($request->is('v1/*') || $request->expectsJson()) {
+                return $response;
+            }
+
+            $component = match ($response->getStatusCode()) {
+                403 => 'Errors/Forbidden',
+                404, 419 => 'Errors/NotFound',
+                500 => config('app.debug') ? null : 'Errors/NotFound',
+                default => null,
+            };
+
+            if ($component === null) {
+                return $response;
+            }
+
+            return Inertia::render($component, ['status' => $response->getStatusCode()])
+                ->toResponse($request)
+                ->setStatusCode($response->getStatusCode());
         });
     })->create();

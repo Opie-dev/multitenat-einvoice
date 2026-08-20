@@ -25,6 +25,9 @@ if (getenv('OPENSSL_CONF') === false) {
 require_once __DIR__.'/Support/Golden.php';
 
 pest()->extend(TestCase::class)->use(RefreshDatabase::class)->in('Feature');
+pest()->beforeEach(function () {
+    $this->withoutVite();
+})->in('Feature/Web');
 pest()->extend(TestCase::class)->in('Unit');
 pest()->extend(TestCase::class)->in('Integration');
 
