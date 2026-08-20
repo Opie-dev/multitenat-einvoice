@@ -43,16 +43,23 @@ activation; `lhdn_credentials_invalid` and `lhdn_unavailable` need a manual
 `submitted` state is ever reached). `held -> held` covers moving an
 already-held document to a different hold reason.
 
-**The two post-`valid` edges in the diagram above are not proactively
-detected yet.** `valid -> rejected` (the buyer rejects within 72h) and a
-cancellation performed directly in the MyInvois portal are only noticed if a
-`PollSubmission` for that submission happens to run again *after* LHDN changed
-the status — which normally never happens, because polling stops as soon as
-every document in the submission is final. The engine therefore keeps showing
-such a document as `valid`. A dedicated status-refresh job that re-reads
-`valid` documents inside their 72h window is Plan 4 (spec §6.5); until then
-the transitions exist in the state machine and in `PollSubmission::apply()`,
-but nothing drives them on a schedule.
+**The two post-`valid` edges in the diagram above are detected by a periodic
+refresh, not by the poller.** `PollSubmission` stops re-checking a submission
+as soon as every document in it is final, so `valid -> rejected` (the buyer
+rejects) and a cancellation performed directly in the MyInvois portal would
+never be seen by the polling path on their own. Instead, `App\Jobs\RefreshDocumentStatus`
+(dispatched by the `einvoice:lhdn-dispatch` sweep, not by the submission
+pipeline) calls `getDocument` for one already-`valid` document and applies
+`rejected`/`cancelled` via `DocumentStateMachine::applyLhdnVerdict()` if
+LHDN reports either. A document is only refreshed while it's within
+`lhdn.status_refresh.max_age_days` of validation (default 7) and it hasn't
+been refreshed in the last `lhdn.status_refresh.interval_hours` (default 6);
+the sweep caps how many refreshes it dispatches per issuer per run
+(`LhdnDispatch::REFRESH_SWEEP_LIMIT_PER_ISSUER`, 50) so one issuer's backlog
+can't starve the rest. `lhdn_refreshed_at` is stamped on every check
+(including a `getDocument` 404, which is treated as a stable "LHDN doesn't
+know this document" answer for that cycle) so the sweep always picks the
+least-recently-refreshed documents next.
 
 ## 2. Components
 
@@ -73,7 +80,8 @@ but nothing drives them on a schedule.
 | `SubmitDocuments` | `app/Jobs/SubmitDocuments.php` | Batches one issuer's prepared, due (`next_submission_at`) documents (oldest first, up to `submission.max_documents` / `submission.max_bytes`) into one `submitDocuments` call; settles accepted documents to `submitted` and dispatches `PollSubmission`; settles rejected ones to `invalid`; on a client exception, applies retry/backoff or holds per §4 below. |
 | `PollSubmission` | `app/Jobs/PollSubmission.php` | Polls `getSubmission` for one `submissionUid`; settles each document to `valid`/`invalid`; reschedules itself along `poll.backoff_seconds` until the submission is final. A failed *read* never settles a document (see §4); at the end of the curve it falls back to a per-document `getDocument` check. It can also settle a previously-`valid` document reported `rejected`/`cancelled`, but only if a poll happens to run at that moment — see the note in §1. |
 | `ReleaseHeldDocuments` | `app/Jobs/ReleaseHeldDocuments.php` | Re-queues documents held for a releasable reason once the issuer activates. |
-| `einvoice:lhdn-dispatch` | `app/Console/Commands/LhdnDispatch.php` | Safety-net sweep (see §3). |
+| `RefreshDocumentStatus` | `app/Jobs/RefreshDocumentStatus.php` | Re-reads one already-`valid` document via `getDocument` and applies `rejected`/`cancelled` if LHDN's answer changed; stamps `lhdn_refreshed_at` either way. Dispatched only by the `einvoice:lhdn-dispatch` sweep — see §1. |
+| `einvoice:lhdn-dispatch` | `app/Console/Commands/LhdnDispatch.php` | Safety-net sweep (see §3), also the sole driver of `RefreshDocumentStatus`. |
 
 ## 3. Configuration
 
@@ -94,6 +102,9 @@ All keys live in `config/lhdn.php`, env-overridable:
 | `submission.max_documents` / `max_bytes` / `max_document_bytes` | — | Batch caps (documents per call, total wire bytes per call, wire bytes per document). |
 | `submission.max_attempts` / `retry_backoff_seconds` | — | Retry ceiling and backoff curve (seconds) for transient submission failures before a document is held with `lhdn_unavailable`. |
 | `poll.backoff_seconds` | — | Backoff curve `PollSubmission` walks between polls of one submission. |
+| `status_refresh.max_age_days` | `LHDN_STATUS_REFRESH_MAX_AGE_DAYS` | A `valid` document stops being refreshed once it's older than this many days past validation (default 7 — matches the cancellation window). |
+| `status_refresh.interval_hours` | `LHDN_STATUS_REFRESH_INTERVAL_HOURS` | Minimum gap between two `RefreshDocumentStatus` checks of the same document (default 6). |
+| `duplicate_rejection_codes` | — | LHDN rejection codes treated as "this codeNumber was already submitted" for the duplicate-recovery path in §4 (default `['DUPLICATE_SUBMISSION']`); a rejection message matching `/duplicat/i` is also recognised regardless of code. |
 
 ## 4. Error handling & `submission_attempts`
 
@@ -112,6 +123,19 @@ Every LHDN client call raises `App\Lhdn\LhdnException` with a `LhdnErrorKind`:
     from the response. Any *other* terminal status from `submitDocuments` (404,
     405, 408, 409, …) is about the request plumbing rather than the invoices, so
     it takes the transient retry/backoff path instead.
+    - **Exception: a duplicate-`codeNumber` rejection recovers instead of
+      going `invalid`.** If the rejection's code is in
+      `lhdn.duplicate_rejection_codes` (or its message matches `/duplicat/i`),
+      `SubmitDocuments::recoverDuplicate()` looks back through the issuer's
+      last 20 `submit` `submission_attempts` for the uuid LHDN already
+      assigned that `codeNumber` — the situation this covers is a worker
+      dying between LHDN accepting a document and that acceptance being
+      saved, so a resubmit gets told the codeNumber already exists. When a
+      matching prior attempt with a uuid is found, the document adopts it,
+      transitions to `submitted` (event `duplicate_recovered`), and
+      `PollSubmission` resumes against the recovered `submission_uid`. If no
+      matching attempt (or no uuid on it) is found, the rejection falls
+      through to the normal `invalid` handling.
   - `getSubmission`: never a verdict on the documents. A failed poll — terminal,
     transient or `breaker` alike — only reschedules the poll along
     `poll.backoff_seconds`. When that curve is exhausted, `PollSubmission` asks
@@ -199,19 +223,24 @@ stalling a document forever.
    issuer is active are held (`issuer_not_active`) and released automatically
    on activation.
 
-There is no daily monitor yet that notices a certificate expiring on its own
-(that's the spec §7.4 job, Plan 4 — see the limitations note in §8 below).
-Today, `IssuerActivator::apply()` only re-evaluates an issuer's status
-lazily, on `authorize` or a certificate upload: if it runs and finds the
-issuer `active` with an expired certificate (`hasValidCertificate()` false),
-it moves the issuer to `suspended` at that point. So an issuer whose
-certificate quietly expires stays `active` in the database — and the
-pipeline keeps trying to sign and submit its documents, which then hold with
-`certificate_expired` from `PrepareDocument`'s own check — until the next
-`authorize` or certificate upload runs `apply()` and catches up the status.
+A daily job, `einvoice:monitor-certificates` (scheduled 02:00
+Asia/Kuala_Lumpur), now notices a certificate expiring on its own (spec
+§7.4). It walks every tenant/environment/issuer with a certificate: an
+`active` issuer whose certificate has lapsed is suspended (`certificate.expired`
+fires, its documents move to `held` with reason `certificate_expired`); one
+still valid but crossing a 30/7/1-day threshold gets a single
+`certificate.expiring` webhook per threshold, deduped via
+`issuer_secrets.expiry_notified_at_days` (reset to `null` on every new
+certificate upload).
+
+Independently of that sweep, `IssuerActivator::apply()` still also
+re-evaluates an issuer's status lazily, on `authorize` or a certificate
+upload: if it runs and finds the issuer `active` with an expired certificate,
+it moves the issuer to `suspended` at that point too — so the status is
+corrected either by the next `authorize`/certificate-upload call or, at the
+latest, by the next `monitor-certificates` run, whichever comes first.
 Uploading a new (valid) certificate always re-activates and releases held
-documents, regardless of whether the stale status was ever corrected to
-`suspended` in between.
+documents, regardless of which path caught the expiry first.
 
 ## 7. Sandbox tests
 
@@ -265,6 +294,9 @@ fixtures, or tests.
   being hardcoded in the jobs, so they can be tuned per environment/deployment
   without a code change.
 
-**Not yet built (Plan 4):** status-refresh job for `valid` documents (buyer
-rejection / portal-side cancellation, see §1), certificate expiry monitor /
-automatic suspension, webhooks, consolidation, PDF.
+- **Status-refresh, certificate monitor, webhooks, consolidation and PDF are
+  all built (Plan 4).** Status-refresh (§1, §2) and the certificate monitor
+  (§6) are covered above since they're part of this pipeline; webhook
+  delivery, PDF generation, and monthly B2C consolidation are documented in
+  the README and in spec §5.6/§7.2/§7.3 (this doc stays scoped to the
+  submission/status pipeline itself).

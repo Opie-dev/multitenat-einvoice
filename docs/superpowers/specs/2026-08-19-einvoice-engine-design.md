@@ -139,6 +139,8 @@ consolidate=true documents: validated --> awaiting_consolidation --> consolidate
 ### 5.6 Consolidation
 Scheduled job (daily, acts on the previous month for issuers with `consolidation_enabled`, target completion by the 7th): groups `awaiting_consolidation` documents per issuer x currency x month into consolidated invoices (buyer = General Public, TIN `EI00000000010`), one line per classification code with description listing the source ref range, submits them via the normal pipeline, and links children (`consolidated_into_id`). Children move to `consolidated`; if the parent goes `invalid`, children return to `awaiting_consolidation` and an alert webhook fires.
 
+**As-built (amended 2026-08-20, Plan 4):** the parent's natural key (`source.ref`) is `cons-{issuerId}-{YYYY-MM}-{currency}`, generation-suffixed `-r{n}` once the latest generation for that issuer × month × currency is `invalid` — a rejected parent is superseded by a new parent document, never resubmitted; a parent that is not `invalid` keeps its key, so an unchanged re-run of the same month is an idempotent replay. Parent failure (`invalid`) releases every linked child `consolidated -> awaiting_consolidation` and fires `document.consolidation_failed` once per child (not one alert per parent). The pool is invoices only — the semantic validator rejects `consolidate: true` on note types, since a note nets against an invoice and pooling it as a positive consolidated line would overstate the month. For a foreign-currency group, the parent's `exchange_rate` is taken from the last child receipt carrying one (walked in id order) — a recorded ruling rather than a live rate lookup. Leftover receipts found against a parent that is *not* `invalid` (e.g. a second run before the month has fully settled) are a hard stop, not a silent drop: the natural-key idempotency check (§5.4) raises a payload-mismatch conflict, which surfaces here as a `consolidation.skipped` `Log::error` entry and a non-zero `einvoice:consolidate` exit — **runbook:** an operator must reconcile the affected issuer/month/currency by hand (check `consolidation.skipped` logs for the issuer/month/currency, decide whether the extra receipts belong in a corrected next-generation parent) before the next scheduled run will make progress on it.
+
 ## 6. LHDN gateway
 
 ### 6.1 Clients
@@ -163,19 +165,25 @@ Per document (queued job `PrepareDocument`): `BuildUbl` (UBL 2.1 JSON per LHDN S
 ### 6.5 Cancellation & rejection
 `POST /v1/documents/{id}/cancel {reason}` -> LHDN cancel within 72h of validation -> `cancelled`. Buyer rejections detected by poller/notification -> `rejected`; issuer must cancel or ignore per LHDN rules.
 
+**As-built (amended 2026-08-20, Plan 4):** buyer rejections and portal-side cancellations are detected by the periodic `RefreshDocumentStatus` job, not the poller — once a document reaches `valid`, `PollSubmission` never looks at it again, so `einvoice:lhdn-dispatch` re-dispatches `RefreshDocumentStatus` for documents due a refresh (`lhdn_status_at` within `lhdn.status_refresh.max_age_days`, and `lhdn_refreshed_at` either unset or older than `lhdn.status_refresh.interval_hours`), capped per issuer per sweep. Duplicate-`codeNumber` rejections on resubmit (e.g. a worker died after LHDN accepted a document but before the acceptance was saved) recover automatically instead of being marked `invalid`: `SubmitDocuments` recognises the duplicate-rejection code/message and looks back through the issuer's recent `submission_attempts` for the uuid LHDN already assigned that `codeNumber`, adopting it and resuming polling.
+
 ## 7. Supporting services
 
 ### 7.1 Reference data
 Table: `reference_codes` (`set`, `code`, `description`, `extra` json, `version`; unique `(set, code)`) holding all nine LHDN code lists. Seeded from LHDN SDK JSON; `einvoice:refresh-reference-data` artisan command; version column; read via `GET /v1/reference/{set}` (cached, ETag).
 
 ### 7.2 Webhooks
-`webhook_endpoints` per tenant (url, secret, events[], enabled, environment). Delivery via spatie/laravel-webhook-server: HMAC-SHA256 signature header, retries with backoff (up to 24h), `webhook_deliveries` log, manual redelivery endpoint. Events: `document.validated`, `document.held`, `document.queued`, `document.submitted`, `document.valid`, `document.invalid`, `document.cancelled`, `document.rejected`, `document.consolidated`, `issuer.status_changed`, `certificate.expiring`, `certificate.expired`.
+`webhook_endpoints` per tenant (url, secret, events[], enabled, environment). Delivery via a custom tenant-aware `App\Jobs\DeliverWebhook` queued job (amended 2026-08-20, Plan 4 — not spatie/laravel-webhook-server as originally scoped; see §12 decisions log): HMAC-SHA256 signature over the exact bytes sent in header `X-Einvoice-Signature` (event name in `X-Einvoice-Event`), retry curve `[60, 300, 1800, 7200, 21600, 86400]` seconds (final retry ~1 day out, then `exhausted`), `webhook_deliveries` log, manual redelivery endpoint. Events: `document.validated`, `document.held`, `document.queued`, `document.submitted`, `document.valid`, `document.invalid`, `document.cancelled`, `document.rejected`, `document.consolidated`, `document.consolidation_failed`, `issuer.status_changed`, `certificate.expiring`, `certificate.expired`.
 
 ### 7.3 PDF & QR
 `GET /v1/documents/{id}/pdf` renders a visual invoice (Blade + dompdf) with LHDN validation link QR (`{portal}/{uuid}/share/{long_id}`) once `valid`; cached to storage; regenerated on cancel to show status.
 
+**As-built (amended 2026-08-20, Plan 4):** generation is lazy, not scheduled — the first `GET` after the document reaches `valid`, `cancelled` or `rejected` (and has an `lhdn_uuid`) renders and caches the PDF to `documents/pdf/{tenant_id}/{document_id}.pdf` on the `local` disk. `pdf_path` and the document's `updated_at` are persisted *before* the file is written, so `DocumentPdfGenerator::stale()` — comparing the cached file's mtime against `updated_at` — reliably notices any later change (a cancellation, for instance) and regenerates on the next request. Requesting the PDF for a document that has never reached one of those three statuses, or has no `lhdn_uuid` yet, returns `409 pdf_not_available`.
+
 ### 7.4 Certificate lifecycle
 Daily job checks `cert_not_after`; emits `certificate.expiring` at 30/7/1 days, `certificate.expired` and moves issuer to `suspended` (documents -> `held`, reason `certificate_expired`) on expiry. Uploading a new cert re-activates and releases held documents.
+
+**As-built (amended 2026-08-20, Plan 4):** `einvoice:monitor-certificates`, scheduled daily at 02:00 Asia/Kuala_Lumpur, walks every tenant/environment/issuer with a certificate. Expiry notices are deduped via `issuer_secrets.expiry_notified_at_days` — at most one `certificate.expiring` webhook per crossed threshold (checked closest-to-expiry first: 1, then 7, then 30 days out), and the column is reset to `null` on every new certificate upload so the next expiry cycle notifies again from a clean slate. An `active` issuer whose certificate has lapsed is suspended (`certificate.expired` fires, its documents move to `held` with reason `certificate_expired`) the next time the daily sweep runs, not at the instant the certificate expires.
 
 ### 7.5 Audit
 `audit_logs`: tenant, actor, action, subject, ip, request id, diff (for issuers/secrets metadata/webhooks/keys). `submission_attempts` keep full LHDN exchanges. Retention: 7 years (LHDN requirement) — no automatic pruning of documents.
@@ -227,7 +235,7 @@ Versioning: URL prefix; breaking changes -> `/v2`.
 - No hosted CI for now (user decision 2026-08-19); `composer check` (Pint + PHPStan level 8 + Pest) is the gate before every commit/merge.
 
 ## 11. Stack
-Laravel 12 · PHP 8.3 · MySQL 8 · Redis · Horizon · Pest · spatie/laravel-data · spatie/laravel-webhook-server · phpseclib (signing) · dompdf (PDF) · endroid/qr-code · Larastan · Pint. Repo: this folder (`billplz/einvoice-engine`), single app.
+Laravel 12 · PHP 8.3 · MySQL 8 · Redis · Horizon · Pest · spatie/laravel-data · phpseclib (signing) · dompdf (PDF) · endroid/qr-code · Larastan · Pint. Webhook delivery is a custom in-repo job (`App\Jobs\DeliverWebhook`, §7.2), not a package. Repo: this folder (`billplz/einvoice-engine`), single app.
 
 ## 12. Decisions log
 | Decision | Choice | Why |
@@ -244,6 +252,7 @@ Laravel 12 · PHP 8.3 · MySQL 8 · Redis · Horizon · Pest · spatie/laravel-d
 | Dashboard front end | Inertia.js + React served by the engine | user decision (2026-08-19) |
 | Read abilities | GET issuers/buyers require `read` | least privilege; recorded during Plan 1 final review |
 | Natural key scoped by environment | sandbox→production reuse of source refs | Plan 2 final review |
+| Webhook delivery implementation | Custom tenant-aware `App\Jobs\DeliverWebhook` job, not spatie/laravel-webhook-server | the package's delivery model doesn't carry `TenantContext` across the queue boundary the way the engine's other jobs do (`TenantAwareJob`); a purpose-built job keeps tenancy rebinding, the exact-bytes HMAC signature, and the retry curve entirely in-repo and testable with `FakeLhdnClient`-style fakes — Plan 4 |
 
 ## 13. Follow-up projects (out of scope here)
 1. `billplz/einvoice-sdk` PHP package (thin client + Laravel service provider).

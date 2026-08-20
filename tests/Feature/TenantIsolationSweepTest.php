@@ -114,8 +114,9 @@ it('lists are empty for another tenant', function () {
     Buyer::factory()->for($owner)->create();
     ApiKey::generate($owner, 'k', Environment::Sandbox, ['read']);
     documentFor($owner);
+    WebhookEndpoint::factory()->for($owner)->create(['environment' => Environment::Sandbox]);
 
-    foreach (['/v1/issuers', '/v1/buyers', '/v1/api-keys', '/v1/documents'] as $path) {
+    foreach (['/v1/issuers', '/v1/buyers', '/v1/api-keys', '/v1/documents', '/v1/webhooks'] as $path) {
         $this->withHeaders(serviceHeaders($intruder, 'sandbox'))->getJson($path)->assertOk()->assertJsonCount(0, 'data');
     }
 });
