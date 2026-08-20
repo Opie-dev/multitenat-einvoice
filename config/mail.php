@@ -115,4 +115,23 @@ return [
         'name' => env('MAIL_FROM_NAME', env('APP_NAME', 'Laravel')),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Markdown Mail Settings
+    |--------------------------------------------------------------------------
+    |
+    | Dashboard mail (Plan 5: magic links, invites) is built with markdown
+    | mailables (resources/views/mail/*.blade.php using x-mail:: components).
+    | This registers the "mail" view namespace those components resolve
+    | through; without it, rendering any markdown mailable throws.
+    |
+    */
+
+    'markdown' => [
+        'theme' => 'default',
+        'paths' => [
+            resource_path('views/vendor/mail'),
+        ],
+    ],
+
 ];

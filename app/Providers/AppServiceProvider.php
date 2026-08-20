@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use App\Auth\SendLoginLink;
 use App\Events\CertificateExpired;
 use App\Events\CertificateExpiring;
 use App\Events\DocumentTransitioned;
@@ -48,6 +49,16 @@ class AppServiceProvider extends ServiceProvider
             ->by($request->bearerToken() !== null
                 ? 'cred:'.hash('sha256', (string) $request->bearerToken())
                 : 'ip:'.$request->ip()));
+
+        // Dashboard (Plan 5, spec §4.2): magic-link requests are throttled both
+        // per (normalized) email and per IP so neither a targeted email nor a
+        // shared NAT can exhaust the other axis's budget. A 429 on either must
+        // never reveal whether the email exists — see MagicLinkTest.
+        RateLimiter::for('login-link-email', fn (Request $request) => Limit::perMinute(5)
+            ->by('email:'.SendLoginLink::normalize((string) $request->input('email', ''))));
+
+        RateLimiter::for('login-link-ip', fn (Request $request) => Limit::perMinute(5)
+            ->by('ip:'.$request->ip()));
 
         // DispatchDocumentWebhooks must run before PrepareDocumentOnQueued: on the
         // sync queue, PrepareDocumentOnQueued recursively runs the rest of the
