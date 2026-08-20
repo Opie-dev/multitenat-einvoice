@@ -11,6 +11,9 @@ Artisan::command('inspire', function () {
 // Safety net for the LHDN submission pipeline; the event-driven chain is the fast path.
 Schedule::command('einvoice:lhdn-dispatch')->everyMinute()->withoutOverlapping();
 
+// spec 5.6: the previous month's B2C receipts, consolidated well before the 7th.
+Schedule::command('einvoice:consolidate')->dailyAt('01:00')->timezone('Asia/Kuala_Lumpur')->withoutOverlapping();
+
 // Certificate lifecycle sweep (spec §7.4): expiry notices and suspension.
 Schedule::command('einvoice:monitor-certificates')->dailyAt('02:00')->timezone('Asia/Kuala_Lumpur')->withoutOverlapping();
 
