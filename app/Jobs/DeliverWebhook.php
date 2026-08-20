@@ -66,6 +66,9 @@ class DeliverWebhook implements ShouldQueue
                 'X-Einvoice-Signature' => $signature,
                 'User-Agent' => 'billplz-einvoice/1.0',
             ])
+                // A receiver has no business redirecting, and following one would
+                // bypass the PublicHttpsUrl destination check at delivery time.
+                ->withoutRedirecting()
                 ->timeout((int) config('einvoice.webhooks.timeout', 10))
                 ->withBody($body, 'application/json')
                 ->post($endpoint->url);

@@ -88,6 +88,29 @@ it('marks a delivery retrying and re-dispatches with a delay after a non-2xx res
     Queue::assertPushed(DeliverWebhook::class, fn ($job) => $job->deliveryId === $delivery->id && $job->delay !== null);
 });
 
+it('treats a redirect as a failed attempt instead of following it', function () {
+    // Following a redirect would bypass the PublicHttpsUrl destination check at
+    // delivery time (a validated public URL could 302 to an internal address).
+    Http::fake(['https://hooks.example.test/*' => Http::response('', 302, ['Location' => 'https://169.254.169.254/latest/meta-data'])]);
+    $tenant = Tenant::factory()->create();
+    $endpoint = webhookEndpointFor($tenant);
+
+    app(TenantContext::class)->bind($tenant, null, Environment::Sandbox);
+    $delivery = pendingDelivery($endpoint, ['id' => 'evt', 'event' => 'document.valid', 'created_at' => now()->toIso8601String(), 'data' => []]);
+
+    Queue::fake();
+    (new DeliverWebhook($delivery->id))->handle();
+    app(TenantContext::class)->clear();
+
+    $delivery->refresh();
+    expect($delivery->status)->toBe(WebhookDeliveryStatus::Retrying)
+        ->and($delivery->http_status)->toBe(302);
+
+    // Exactly one request, to the endpoint itself — the Location target is never fetched.
+    Http::assertSentCount(1);
+    Http::assertSent(fn ($request) => $request->url() === $endpoint->url);
+});
+
 it('exhausts a delivery once the backoff curve is spent', function () {
     // With a single-entry backoff curve, two failures exhaust the delivery. On the
     // sync queue connection a retry's self-dispatch runs inline (delay is ignored),
