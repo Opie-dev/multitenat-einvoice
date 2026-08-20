@@ -11,11 +11,20 @@ use App\Models\Document;
 /** Manual release of a stored document into the submission queue. */
 class SubmitDocument
 {
+    /**
+     * Statuses this action accepts a submit/resubmit call from. Single
+     * source of truth for `handle()`'s own guard and
+     * `App\Domain\Documents\DocumentAbilities::for()`'s `can_resubmit`.
+     *
+     * @var list<DocumentStatus>
+     */
+    public const RESUBMITTABLE_STATUSES = [DocumentStatus::Validated, DocumentStatus::Held, DocumentStatus::Invalid];
+
     public function __construct(private readonly DocumentStateMachine $stateMachine) {}
 
     public function handle(Document $document): Document
     {
-        if (! in_array($document->status, [DocumentStatus::Validated, DocumentStatus::Held, DocumentStatus::Invalid], true)) {
+        if (! in_array($document->status, self::RESUBMITTABLE_STATUSES, true)) {
             throw ProblemException::conflict("Document in status {$document->status->value} cannot be submitted.", 'invalid_transition');
         }
 

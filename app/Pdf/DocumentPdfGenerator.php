@@ -18,6 +18,15 @@ use Illuminate\Support\Facades\Storage;
  */
 class DocumentPdfGenerator
 {
+    /**
+     * Statuses a PDF is servable for. Single source of truth for
+     * `DocumentPdfController::show()`'s availability guard and
+     * `App\Domain\Documents\DocumentAbilities::for()`'s `can_pdf`.
+     *
+     * @var list<DocumentStatus>
+     */
+    public const AVAILABLE_STATUSES = [DocumentStatus::Valid, DocumentStatus::Cancelled, DocumentStatus::Rejected];
+
     public function generate(Document $document): string
     {
         $document->loadMissing('lines', 'issuer');
